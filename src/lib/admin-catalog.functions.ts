@@ -184,3 +184,105 @@ export const adminDeleteCategory = createServerFn({ method: "POST" })
     await audit(user, "category.delete", "category", data.id);
     return { ok: true };
   });
+
+/* ---------- CSV import / export (WooCommerce-style) ---------- */
+const CSV_COLS = ["slug", "name", "bn", "categorySlug", "price", "compareAt", "unit", "sku", "brand", "stock", "isBestSeller", "isNewArrival", "tags", "image", "description"] as const;
+
+function csvCell(v: unknown): string {
+  const s = v == null ? "" : String(v);
+  return /[",\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
+}
+
+function parseCsv(text: string): Record<string, string>[] {
+  const rows: string[][] = [];
+  let row: string[] = [];
+  let cur = "";
+  let inQ = false;
+  const t = text.replace(/\r\n?/g, "\n");
+  for (let i = 0; i < t.length; i++) {
+    const c = t[i];
+    if (inQ) {
+      if (c === '"') { if (t[i + 1] === '"') { cur += '"'; i++; } else inQ = false; }
+      else cur += c;
+    } else if (c === '"') inQ = true;
+    else if (c === ",") { row.push(cur); cur = ""; }
+    else if (c === "\n") { row.push(cur); rows.push(row); row = []; cur = ""; }
+    else cur += c;
+  }
+  if (cur.length || row.length) { row.push(cur); rows.push(row); }
+  const nonEmpty = rows.filter((r) => r.some((c) => c.trim() !== ""));
+  if (nonEmpty.length < 2) return [];
+  const header = nonEmpty[0].map((h) => h.trim());
+  return nonEmpty.slice(1).map((r) => {
+    const o: Record<string, string> = {};
+    header.forEach((h, i) => (o[h] = (r[i] ?? "").trim()));
+    return o;
+  });
+}
+
+export const adminExportProductsCsv = createServerFn({ method: "GET" }).handler(async (): Promise<string> => {
+  const { requireStaff } = await import("@/server/auth/context");
+  const { db } = await import("@/server/db");
+  const { products } = await import("@/server/db/schema");
+  await requireStaff();
+  const rows = await db.select().from(products);
+  const lines = rows.map((r) =>
+    CSV_COLS.map((c) => {
+      if (c === "tags") return csvCell((r.tags ?? []).join("|"));
+      if (c === "isBestSeller" || c === "isNewArrival") return csvCell((r as Record<string, unknown>)[c] ? "yes" : "no");
+      return csvCell((r as Record<string, unknown>)[c]);
+    }).join(","),
+  );
+  return [CSV_COLS.join(","), ...lines].join("\n");
+});
+
+export const adminImportProductsCsv = createServerFn({ method: "POST" })
+  .inputValidator((i: unknown) => z.object({ csv: z.string().max(4_000_000) }).parse(i))
+  .handler(async ({ data }): Promise<{ created: number; updated: number; errors: number }> => {
+    const { requireManager } = await import("@/server/auth/context");
+    const { db } = await import("@/server/db");
+    const { products } = await import("@/server/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const { audit } = await import("@/server/audit");
+    const actor = await requireManager();
+    const rows = parseCsv(data.csv);
+    const bool = (v: string) => /^(1|true|yes|y)$/i.test((v ?? "").trim());
+    const slugify = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "");
+    let created = 0, updated = 0, errors = 0;
+    for (const row of rows) {
+      try {
+        const name = (row.name || "").trim();
+        const slug = (row.slug || "").trim() || slugify(name);
+        if (!name || !slug) { errors++; continue; }
+        const image = (row.image || "").trim();
+        const vals = {
+          name,
+          bn: row.bn || "",
+          categorySlug: (row.categorySlug || row.category || "").trim(),
+          price: Math.max(0, Math.round(Number(row.price) || 0)),
+          compareAt: row.compareAt && Number(row.compareAt) > 0 ? Math.round(Number(row.compareAt)) : null,
+          unit: row.unit || "",
+          sku: row.sku || null,
+          brand: row.brand || null,
+          stock: Math.max(0, Math.round(Number(row.stock) || 0)),
+          isBestSeller: bool(row.isBestSeller),
+          isNewArrival: bool(row.isNewArrival),
+          tags: (row.tags || "").split("|").map((x) => x.trim()).filter(Boolean),
+          image,
+          description: row.description || "",
+        };
+        const [ex] = await db.select({ id: products.id }).from(products).where(eq(products.slug, slug)).limit(1);
+        if (ex) {
+          await db.update(products).set({ ...vals, updatedAt: new Date() }).where(eq(products.id, ex.id));
+          updated++;
+        } else {
+          await db.insert(products).values({ slug, ...vals, images: image ? [image] : [], weightOptions: [], active: true });
+          created++;
+        }
+      } catch {
+        errors++;
+      }
+    }
+    await audit(actor, "products.import", "products", "csv", { created, updated, errors });
+    return { created, updated, errors };
+  });

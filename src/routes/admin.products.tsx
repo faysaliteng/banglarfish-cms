@@ -1,10 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { adminListProducts, adminUpsertProduct, adminDeleteProduct, adminListCategories } from "@/lib/admin-catalog.functions";
+import { adminListProducts, adminUpsertProduct, adminDeleteProduct, adminListCategories, adminExportProductsCsv, adminImportProductsCsv } from "@/lib/admin-catalog.functions";
 import { adminListMedia } from "@/lib/admin-content.functions";
 import { formatBDT } from "@/lib/cart";
-import { Search, Plus, Edit, Trash2, Package, X } from "lucide-react";
+import { Search, Plus, Edit, Trash2, Package, X, Download, Upload } from "lucide-react";
 import { Modal, TextField, TextArea, SelectField } from "@/components/admin/Modal";
 import { RichTextEditor } from "@/components/admin/RichTextEditor";
 import { toast } from "sonner";
@@ -109,6 +109,39 @@ function AdminProducts() {
   const listMedia = useServerFn(adminListMedia);
   const upsert = useServerFn(adminUpsertProduct);
   const del = useServerFn(adminDeleteProduct);
+  const exportCsv = useServerFn(adminExportProductsCsv);
+  const importCsv = useServerFn(adminImportProductsCsv);
+  const [importing, setImporting] = useState(false);
+
+  async function onExportCsv() {
+    try {
+      const csv = await exportCsv();
+      const blob = new Blob([csv], { type: "text/csv;charset=utf-8" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `products-${new Date().toISOString().slice(0, 10)}.csv`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Export failed");
+    }
+  }
+  async function onImportCsv(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = "";
+    if (!file) return;
+    setImporting(true);
+    try {
+      const csv = await file.text();
+      const res = await importCsv({ data: { csv } });
+      toast.success(`Imported: ${res.created} created, ${res.updated} updated${res.errors ? `, ${res.errors} skipped` : ""}.`);
+      loadProducts();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Import failed");
+    } finally {
+      setImporting(false);
+    }
+  }
 
   const [products, setProducts] = useState<Row[]>([]);
   const [categories, setCategories] = useState<Cat[]>([]);
@@ -203,9 +236,16 @@ function AdminProducts() {
           <h1 className="text-2xl font-bold">Products</h1>
           <p className="text-sm text-muted-foreground">{products.length} total · {products.filter((p) => p.stock < 30).length} low stock</p>
         </div>
-        <button onClick={openNew} className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-semibold shrink-0">
-          <Plus className="h-4 w-4" /> Add product
-        </button>
+        <div className="flex items-center gap-2 flex-wrap">
+          <button onClick={onExportCsv} className="inline-flex items-center gap-2 border px-3 py-2 rounded-md text-sm font-medium hover:bg-muted"><Download className="h-4 w-4" /> Export CSV</button>
+          <label className="inline-flex items-center gap-2 border px-3 py-2 rounded-md text-sm font-medium hover:bg-muted cursor-pointer">
+            <Upload className="h-4 w-4" /> {importing ? "Importing…" : "Import CSV"}
+            <input type="file" accept=".csv,text/csv" className="hidden" onChange={onImportCsv} disabled={importing} />
+          </label>
+          <button onClick={openNew} className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-semibold shrink-0">
+            <Plus className="h-4 w-4" /> Add product
+          </button>
+        </div>
       </div>
       <div className="bg-card border rounded-xl">
         <div className="p-4 border-b flex flex-wrap gap-3">

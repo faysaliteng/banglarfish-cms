@@ -2,7 +2,7 @@ import { createFileRoute, notFound, Link } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { ProductCard } from "@/components/site/ProductCard";
 import { getProductBySlug } from "@/lib/catalog.functions";
-import { cart, formatBDT } from "@/lib/cart";
+import { cart, formatBDT, getCurrency } from "@/lib/cart";
 import { useState } from "react";
 import { Star, ShoppingBag, Truck, ShieldCheck, Snowflake, Minus, Plus } from "lucide-react";
 import type { Variant } from "@/lib/types";
@@ -198,7 +198,7 @@ function ProductPage() {
             sku: product.sku || undefined,
             description: stripHtml(product.description).slice(0, 300),
             brand: product.brand ? { "@type": "Brand", name: product.brand } : undefined,
-            offers: { "@type": "Offer", priceCurrency: "BDT", price: unitPrice, availability: product.stock > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock" },
+            offers: { "@type": "Offer", priceCurrency: getCurrency().code, price: getCurrency().decimals > 0 ? unitPrice / Math.pow(10, getCurrency().decimals) : unitPrice, availability: product.stock > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock" },
             aggregateRating: product.reviews > 0 ? { "@type": "AggregateRating", ratingValue: product.rating, reviewCount: product.reviews } : undefined,
           }),
         }}
