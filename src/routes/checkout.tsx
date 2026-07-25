@@ -1,0 +1,184 @@
+import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { SiteLayout } from "@/components/site/SiteLayout";
+import { useCart, cart, cartTotals, formatBDT } from "@/lib/cart";
+import { useEffect, useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
+import { me } from "@/lib/auth.functions";
+import { getProfile } from "@/lib/account.functions";
+import { createOrder } from "@/lib/orders.functions";
+import { withBase } from "@/lib/base-path";
+import { toast } from "sonner";
+
+export const Route = createFileRoute("/checkout")({
+  head: () => ({ meta: [{ title: "Checkout — Banglarfish" }, { name: "description", content: "Complete your order." }] }),
+  component: Checkout,
+});
+
+type Prefill = { full_name?: string; phone?: string; address_line1?: string; address_line2?: string | null; city?: string; district?: string | null; postal_code?: string | null };
+
+function Checkout() {
+  const { lines } = useCart();
+  const totals = cartTotals(lines);
+  const nav = useNavigate();
+  const [placing, setPlacing] = useState(false);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [signedIn, setSignedIn] = useState(false);
+  const [prefill, setPrefill] = useState<Prefill | null>(null);
+
+  const fetchMe = useServerFn(me);
+  const fetchProfile = useServerFn(getProfile);
+  const submitOrder = useServerFn(createOrder);
+
+  useEffect(() => {
+    fetchMe().then(async (user) => {
+      const isIn = !!user;
+      setSignedIn(isIn);
+      if (isIn) {
+        try {
+          const p = await fetchProfile();
+          setPrefill(p as Prefill);
+        } catch { /* ignore */ }
+      }
+      setCheckingAuth(false);
+    });
+  }, [fetchMe, fetchProfile]);
+
+  if (lines.length === 0) {
+    return (
+      <SiteLayout>
+        <div className="container-x py-20 text-center">
+          <p>Your cart is empty.</p>
+          <Link to="/shop" className="text-primary hover:underline">Go to shop</Link>
+        </div>
+      </SiteLayout>
+    );
+  }
+
+  if (checkingAuth) {
+    return <SiteLayout><div className="container-x py-20 text-center text-sm text-muted-foreground">Loading…</div></SiteLayout>;
+  }
+
+  if (!signedIn) {
+    return (
+      <SiteLayout>
+        <div className="container-x py-16 max-w-md mx-auto text-center">
+          <h1 className="text-2xl font-bold mb-3">Sign in to checkout</h1>
+          <p className="text-sm text-muted-foreground mb-6">We need your account to track and deliver your order.</p>
+          <Link to="/auth" search={{ next: "/checkout" }} className="inline-block bg-primary text-primary-foreground rounded-md px-6 py-3 text-sm font-semibold hover:bg-primary/90">
+            Sign in or create account
+          </Link>
+        </div>
+      </SiteLayout>
+    );
+  }
+
+  async function place(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    setPlacing(true);
+    const fd = new FormData(e.currentTarget);
+    try {
+      const result = await submitOrder({
+        data: {
+          full_name: String(fd.get("full_name") ?? ""),
+          phone: String(fd.get("phone") ?? ""),
+          address_line1: String(fd.get("address_line1") ?? ""),
+          address_line2: String(fd.get("address_line2") ?? "") || null,
+          city: String(fd.get("city") ?? ""),
+          district: String(fd.get("district") ?? "") || null,
+          postal_code: String(fd.get("postal_code") ?? "") || null,
+          notes: String(fd.get("notes") ?? "") || null,
+          payment_method: String(fd.get("pay") ?? "cod") as "cod" | "bkash" | "nagad" | "card",
+          coupon_code: String(fd.get("coupon") ?? "").trim() || null,
+          items: lines.map((l) => ({ productId: l.productId, variantId: l.variantId ?? null, weight: l.weight, qty: l.qty })),
+        },
+      });
+      cart.clear();
+      // COD returns a relative confirmation URL; online methods return a gateway URL.
+      window.location.href = withBase(result.redirect_url);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to place order");
+      setPlacing(false);
+    }
+  }
+
+  return (
+    <SiteLayout>
+      <div className="container-x py-8">
+        <h1 className="text-3xl font-bold mb-6">Checkout</h1>
+        <form onSubmit={place} className="grid lg:grid-cols-[1fr_380px] gap-8">
+          <div className="space-y-6">
+            <Section title="Delivery Address">
+              <Input name="full_name" placeholder="Full name *" required defaultValue={prefill?.full_name ?? ""} />
+              <Input name="phone" type="tel" placeholder="Phone * (e.g. 017XXXXXXXX)" required defaultValue={prefill?.phone ?? ""} />
+              <Input name="address_line1" placeholder="Street address *" required defaultValue={prefill?.address_line1 ?? ""} />
+              <Input name="address_line2" placeholder="Apartment, suite, etc. (optional)" defaultValue={prefill?.address_line2 ?? ""} />
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <Input name="city" placeholder="City *" required defaultValue={prefill?.city ?? "Dhaka"} />
+                <Input name="postal_code" placeholder="Postal code" defaultValue={prefill?.postal_code ?? ""} />
+              </div>
+              <Input name="district" placeholder="District" defaultValue={prefill?.district ?? ""} />
+              <textarea name="notes" placeholder="Delivery notes (optional)" rows={2} className="w-full border rounded-md px-3 py-2 text-sm" />
+            </Section>
+            <Section title="Payment">
+              <PayOption value="cod" defaultChecked title="Cash on Delivery" desc="Pay when your order arrives" />
+              <PayOption value="bkash" title="bKash" desc="Mobile financial service" />
+              <PayOption value="nagad" title="Nagad" desc="Mobile financial service" />
+              <PayOption value="card" title="Card (Visa / Mastercard)" desc="Secured via SSLCommerz" />
+            </Section>
+          </div>
+          <aside className="border rounded-xl p-6 h-fit bg-muted/30">
+            <h3 className="font-semibold text-lg mb-4">Order ({lines.length})</h3>
+            <ul className="space-y-3 text-sm max-h-72 overflow-auto">
+              {lines.map((l) => (
+                <li key={l.productId + l.weight} className="flex gap-3">
+                  <img src={l.image} alt={l.name} className="h-12 w-12 rounded object-cover" />
+                  <div className="flex-1">
+                    <p className="font-medium leading-tight">{l.name}</p>
+                    <p className="text-xs text-muted-foreground">{l.weight} × {l.qty}</p>
+                  </div>
+                  <span className="font-semibold">{formatBDT(l.price * l.qty)}</span>
+                </li>
+              ))}
+            </ul>
+            <div className="mt-4">
+              <input name="coupon" placeholder="Coupon code (optional)" className="w-full border rounded-md px-3 py-2 text-sm uppercase" />
+              <p className="text-[11px] text-muted-foreground mt-1">Discounts are validated and applied when you place the order.</p>
+            </div>
+            <div className="border-t mt-4 pt-4 space-y-1.5 text-sm">
+              <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{formatBDT(totals.subtotal)}</span></div>
+              <div className="flex justify-between"><span className="text-muted-foreground">Shipping</span><span>{totals.shipping === 0 ? "FREE" : formatBDT(totals.shipping)}</span></div>
+              <div className="flex justify-between text-lg font-bold pt-2"><span>Total</span><span className="text-[var(--color-brand)]">{formatBDT(totals.total)}</span></div>
+            </div>
+            <button disabled={placing} className="w-full mt-5 bg-primary text-primary-foreground py-3 rounded-md font-semibold hover:bg-primary/90 disabled:opacity-60">
+              {placing ? "Placing order..." : "Place Order"}
+            </button>
+          </aside>
+        </form>
+      </div>
+    </SiteLayout>
+  );
+}
+
+function PayOption({ value, title, desc, defaultChecked }: { value: string; title: string; desc: string; defaultChecked?: boolean }) {
+  return (
+    <label className="flex items-center gap-3 p-3 border rounded-md cursor-pointer has-[:checked]:border-primary has-[:checked]:bg-primary/5">
+      <input type="radio" name="pay" value={value} defaultChecked={defaultChecked} />
+      <div>
+        <p className="font-semibold text-sm">{title}</p>
+        <p className="text-xs text-muted-foreground">{desc}</p>
+      </div>
+    </label>
+  );
+}
+
+function Section({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="border rounded-xl p-5">
+      <h3 className="font-semibold mb-4">{title}</h3>
+      <div className="space-y-3">{children}</div>
+    </div>
+  );
+}
+function Input(props: React.InputHTMLAttributes<HTMLInputElement>) {
+  return <input {...props} className="w-full border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />;
+}

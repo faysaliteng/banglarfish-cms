@@ -1,0 +1,27 @@
+# systemd unit for the Banglarfish Node server.
+# Install to: /etc/systemd/system/banglarfish.service
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now banglarfish
+#   sudo journalctl -u banglarfish -f   # logs
+
+[Unit]
+Description=Banglarfish e-commerce (TanStack Start + Node)
+After=network.target postgresql.service
+Wants=postgresql.service
+
+[Service]
+Type=simple
+User=banglarfish
+Group=banglarfish
+WorkingDirectory=/var/www/banglarfish
+EnvironmentFile=/var/www/banglarfish/.env
+ExecStart=/usr/bin/node /var/www/banglarfish/.output/server/index.mjs
+Restart=always
+RestartSec=3
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=full
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

@@ -1,0 +1,365 @@
+@import "tailwindcss" source(none);
+@source "../src";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --radius-sm: calc(var(--radius) - 4px);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-lg: var(--radius);
+  --radius-xl: calc(var(--radius) + 4px);
+  --radius-2xl: calc(var(--radius) + 8px);
+  --color-background: var(--background);
+  --color-foreground: var(--foreground);
+  --color-card: var(--card);
+  --color-card-foreground: var(--card-foreground);
+  --color-popover: var(--popover);
+  --color-popover-foreground: var(--popover-foreground);
+  --color-primary: var(--primary);
+  --color-primary-foreground: var(--primary-foreground);
+  --color-secondary: var(--secondary);
+  --color-secondary-foreground: var(--secondary-foreground);
+  --color-muted: var(--muted);
+  --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
+  --color-destructive: var(--destructive);
+  --color-destructive-foreground: var(--destructive-foreground);
+  --color-border: var(--border);
+  --color-input: var(--input);
+  --color-ring: var(--ring);
+  --color-brand: var(--brand);
+  --color-brand-foreground: var(--brand-foreground);
+  --font-sans: "Inter", ui-sans-serif, system-ui, sans-serif;
+  --font-display: "Poppins", "Inter", sans-serif;
+  --font-bangla: "Hind Siliguri", "Inter", sans-serif;
+}
+
+:root {
+  --radius: 0.625rem;
+  --background: oklch(1 0 0);
+  --foreground: oklch(0.16 0.02 250);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.16 0.02 250);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.16 0.02 250);
+  /* Brand primary — logo blue #29ABE2 */
+  --primary: oklch(0.72 0.14 230);
+  --primary-foreground: oklch(1 0 0);
+  /* Accent — logo coral #F26B4A */
+  --brand: oklch(0.68 0.19 35);
+  --brand-foreground: oklch(1 0 0);
+  --secondary: oklch(0.97 0.01 240);
+  --secondary-foreground: oklch(0.2 0.02 250);
+  --muted: oklch(0.97 0.01 240);
+  --muted-foreground: oklch(0.5 0.02 250);
+  --accent: oklch(0.95 0.03 35);
+  --accent-foreground: oklch(0.35 0.15 35);
+  --destructive: oklch(0.6 0.24 27);
+  --destructive-foreground: oklch(1 0 0);
+  --border: oklch(0.92 0.01 250);
+  --input: oklch(0.92 0.01 250);
+  --ring: oklch(0.72 0.14 230);
+}
+
+.dark {
+  --background: oklch(0.15 0.02 250);
+  --foreground: oklch(0.98 0 0);
+  --card: oklch(0.2 0.02 250);
+  --card-foreground: oklch(0.98 0 0);
+  --popover: oklch(0.2 0.02 250);
+  --popover-foreground: oklch(0.98 0 0);
+  --primary: oklch(0.72 0.14 230);
+  --primary-foreground: oklch(0.15 0.02 250);
+  --brand: oklch(0.68 0.19 35);
+  --brand-foreground: oklch(1 0 0);
+  --secondary: oklch(0.28 0.02 250);
+  --secondary-foreground: oklch(0.98 0 0);
+  --muted: oklch(0.28 0.02 250);
+  --muted-foreground: oklch(0.7 0.02 250);
+  --accent: oklch(0.28 0.02 250);
+  --accent-foreground: oklch(0.98 0 0);
+  --destructive: oklch(0.7 0.19 22);
+  --destructive-foreground: oklch(0.98 0 0);
+  --border: oklch(1 0 0 / 12%);
+  --input: oklch(1 0 0 / 15%);
+  --ring: oklch(0.72 0.14 230);
+}
+
+@layer base {
+  * {
+    border-color: var(--color-border);
+  }
+
+  body {
+    background-color: var(--color-background);
+    color: var(--color-foreground);
+    font-family: var(--font-sans);
+    -webkit-font-smoothing: antialiased;
+  }
+
+  h1, h2, h3, h4, h5 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+  }
+}
+
+@utility container-x {
+  width: 100%;
+  margin-inline: auto;
+  padding-inline: 1rem;
+  max-width: 1280px;
+}
+
+/* ============================================================================
+   Themeable surface + effect engine.
+   Driven by data-* on #bf-root (surface/bg/effects) and the --bf-* CSS vars
+   emitted by themeToCss() (blur, alpha, depth, glow). All 8 surfaces read the
+   same depth/glow knobs so the admin sliders work live.
+   ============================================================================ */
+@layer components {
+  #bf-root {
+    /* Derived, knob-driven shadow + glow colors reused by every surface. */
+    --bf-d: var(--bf-depth, 0.42);
+    --bf-shadow: color-mix(in srgb, var(--foreground) calc(16% + var(--bf-d) * 46%), transparent);
+    --bf-shadow-strong: color-mix(in srgb, var(--foreground) calc(22% + var(--bf-d) * 52%), transparent);
+    --bf-glow-color: color-mix(in srgb, var(--primary) calc(var(--bf-glow, 0.18) * 80%), transparent);
+    --bf-glow-2: color-mix(in srgb, var(--accent2, var(--brand)) calc(var(--bf-glow, 0.18) * 70%), transparent);
+    --bf-lift: 0.5;
+    /* Layered 3D elevation — contact + mid + ambient, deepening with the depth knob.
+       This is what makes cards read as genuinely raised off the page. */
+    --bf-elev:
+      0 1px 1px color-mix(in srgb, var(--foreground) calc(6% + var(--bf-d) * 10%), transparent),
+      0 calc(3px + var(--bf-d) * 8px) calc(8px + var(--bf-d) * 16px) -4px color-mix(in srgb, var(--foreground) calc(11% + var(--bf-d) * 26%), transparent),
+      0 calc(14px + var(--bf-d) * 44px) calc(30px + var(--bf-d) * 64px) -18px color-mix(in srgb, var(--foreground) calc(13% + var(--bf-d) * 48%), transparent);
+    --bf-elev-hover:
+      0 1px 1px color-mix(in srgb, var(--foreground) calc(6% + var(--bf-d) * 10%), transparent),
+      0 calc(8px + var(--bf-d) * 14px) calc(18px + var(--bf-d) * 24px) -4px color-mix(in srgb, var(--foreground) calc(14% + var(--bf-d) * 30%), transparent),
+      0 calc(26px + var(--bf-d) * 70px) calc(52px + var(--bf-d) * 96px) -22px color-mix(in srgb, var(--foreground) calc(16% + var(--bf-d) * 54%), transparent);
+  }
+  #bf-root .bg-card {
+    transition: transform 0.3s cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 0.3s ease, border-color 0.3s ease;
+  }
+
+  /* Elevated: layered 3D drop shadow + hover lift */
+  #bf-root[data-surface="elevated"] .bg-card {
+    box-shadow: var(--bf-elev);
+  }
+  #bf-root[data-surface="elevated"] .bg-card:hover {
+    box-shadow: var(--bf-elev-hover);
+  }
+
+  /* Flat: crisp borders only */
+  #bf-root[data-surface="flat"] .bg-card {
+    box-shadow: none;
+    border: 1px solid var(--border);
+  }
+
+  /* Glass 3D: translucent, blurred, layered depth + colored glow */
+  #bf-root[data-surface="glass"] .bg-card,
+  #bf-root[data-surface="aurora"] .bg-card {
+    background-color: color-mix(in srgb, var(--card) calc(var(--bf-alpha, 0.62) * 100%), transparent);
+    -webkit-backdrop-filter: blur(var(--bf-blur, 16px)) saturate(1.4);
+    backdrop-filter: blur(var(--bf-blur, 16px)) saturate(1.4);
+    border: 1px solid color-mix(in srgb, var(--foreground) 12%, transparent);
+    box-shadow: var(--bf-elev),
+      0 14px 46px -18px var(--bf-glow-color),
+      inset 0 1px 0 color-mix(in srgb, #fff 34%, transparent);
+  }
+  #bf-root[data-surface="glass"] .bg-card:hover,
+  #bf-root[data-surface="aurora"] .bg-card:hover {
+    box-shadow: var(--bf-elev-hover),
+      0 22px 64px -18px var(--bf-glow-color),
+      inset 0 1px 0 color-mix(in srgb, #fff 40%, transparent);
+  }
+
+  /* Aurora: glass + a slowly rotating conic glow ring */
+  #bf-root[data-surface="aurora"] .bg-card {
+    position: relative;
+  }
+  #bf-root[data-surface="aurora"] .bg-card::after {
+    content: "";
+    position: absolute;
+    inset: -1px;
+    border-radius: inherit;
+    padding: 1px;
+    background: conic-gradient(from 0deg, var(--primary), var(--accent2), var(--brand), var(--primary));
+    -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0);
+    -webkit-mask-composite: xor;
+    mask-composite: exclude;
+    opacity: calc(0.35 + var(--bf-glow) * 0.5);
+    pointer-events: none;
+  }
+
+  /* Neo / soft 3D: dual-tone extruded shadow */
+  #bf-root[data-surface="neo"] .bg-card {
+    border: none;
+    box-shadow: calc(8px + var(--bf-depth) * 6px) calc(8px + var(--bf-depth) * 6px) calc(20px + var(--bf-depth) * 14px) color-mix(in srgb, var(--foreground) 14%, transparent),
+      calc(-6px - var(--bf-depth) * 4px) calc(-6px - var(--bf-depth) * 4px) calc(18px + var(--bf-depth) * 12px) color-mix(in srgb, #ffffff 85%, transparent);
+  }
+
+  /* Clay / claymorphism: puffy, soft, inset highlight + real elevation */
+  #bf-root[data-surface="clay"] .bg-card {
+    border: none;
+    background-color: var(--card);
+    box-shadow: var(--bf-elev),
+      inset 0 -6px 14px color-mix(in srgb, var(--foreground) 10%, transparent),
+      inset 0 8px 14px color-mix(in srgb, #ffffff 60%, transparent);
+  }
+
+  /* Glossy: shiny top-light sheen + layered depth + glow */
+  #bf-root[data-surface="glossy"] .bg-card {
+    position: relative;
+    border: 1px solid color-mix(in srgb, var(--foreground) 10%, transparent);
+    box-shadow: var(--bf-elev), 0 14px 44px -18px var(--bf-glow-color);
+  }
+  #bf-root[data-surface="glossy"] .bg-card::before {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    background: linear-gradient(180deg, color-mix(in srgb, #fff 26%, transparent), transparent 42%);
+    pointer-events: none;
+  }
+
+  /* Outline: gradient border, no fill shadow */
+  #bf-root[data-surface="outline"] .bg-card {
+    position: relative;
+    box-shadow: none;
+    border: 1px solid transparent;
+    background-image: linear-gradient(var(--card), var(--card)),
+      linear-gradient(135deg, var(--primary), var(--brand));
+    background-origin: border-box;
+    background-clip: padding-box, border-box;
+  }
+
+  /* Raised 3D primary buttons — depth + glow aware, with a real press-down. */
+  #bf-root .bg-primary {
+    box-shadow: 0 calc(2px + var(--bf-d) * 4px) calc(6px + var(--bf-d) * 12px) -2px color-mix(in srgb, var(--primary) calc(30% + var(--bf-glow) * 45%), transparent),
+      inset 0 1px 0 color-mix(in srgb, #fff 22%, transparent);
+  }
+  #bf-root button.bg-primary,
+  #bf-root a.bg-primary {
+    transition: transform 0.14s cubic-bezier(0.2, 0.7, 0.2, 1), box-shadow 0.2s ease, filter 0.2s ease;
+  }
+  #bf-root[data-animations="on"] button.bg-primary:hover,
+  #bf-root[data-animations="on"] a.bg-primary:hover {
+    transform: translateY(-2px);
+    filter: brightness(1.04) saturate(1.05);
+    box-shadow: 0 calc(6px + var(--bf-d) * 10px) calc(16px + var(--bf-d) * 20px) -4px color-mix(in srgb, var(--primary) calc(42% + var(--bf-glow) * 45%), transparent),
+      inset 0 1px 0 color-mix(in srgb, #fff 26%, transparent);
+  }
+  #bf-root button.bg-primary:active,
+  #bf-root a.bg-primary:active {
+    transform: translateY(1px) scale(0.99);
+    box-shadow: 0 1px 3px -1px color-mix(in srgb, var(--primary) 45%, transparent);
+  }
+
+  /* ---- Card hover lift (motion-gated) ---- */
+  #bf-root[data-animations="on"] .bg-card:hover {
+    transform: translateY(-4px);
+  }
+  #bf-root[data-animations="on"][data-hover3d="on"] .bg-card:hover {
+    transform: perspective(1000px) translateY(-6px) rotateX(3.5deg) rotateY(-2.5deg) scale(1.012);
+  }
+  #bf-root[data-animations="off"] .bg-card {
+    transition: none;
+  }
+
+  /* ---- Effect toggles ---- */
+  #bf-root[data-gradient-buttons="on"] .bg-primary {
+    background-image: var(--bf-grad3);
+    background-color: var(--primary);
+  }
+  #bf-root[data-pill="on"] .bg-primary {
+    border-radius: 9999px;
+  }
+}
+
+/* ---- Background motion (respect reduced-motion) ---- */
+@media (prefers-reduced-motion: no-preference) {
+  @keyframes bf-drift {
+    0% { background-position: 0% 0%; }
+    50% { background-position: 100% 50%; }
+    100% { background-position: 0% 0%; }
+  }
+  @keyframes bf-spin {
+    to { transform: rotate(1turn); }
+  }
+  #bf-root[data-animations="on"][data-bg="aurora"] {
+    animation: bf-drift 24s ease-in-out infinite;
+  }
+  #bf-root[data-animations="on"][data-surface="aurora"] .bg-card::after {
+    animation: bf-spin 8s linear infinite;
+  }
+}
+
+/* ---------- Rich content (editor + storefront rendering) ---------- */
+@layer components {
+  .prose-editor:empty::before {
+    content: attr(data-placeholder);
+    color: var(--color-muted-foreground);
+    pointer-events: none;
+  }
+  .prose-editor h1, .prose-content h1 { font-size: 1.8rem; font-weight: 700; margin: 0.6em 0 0.3em; }
+  .prose-editor h2, .prose-content h2 { font-size: 1.4rem; font-weight: 700; margin: 0.6em 0 0.3em; }
+  .prose-editor h3, .prose-content h3 { font-size: 1.15rem; font-weight: 600; margin: 0.5em 0 0.3em; }
+  .prose-editor p, .prose-content p { margin: 0.5em 0; line-height: 1.7; }
+  .prose-editor ul, .prose-content ul { list-style: disc; padding-left: 1.4em; margin: 0.5em 0; }
+  .prose-editor ol, .prose-content ol { list-style: decimal; padding-left: 1.4em; margin: 0.5em 0; }
+  .prose-editor a, .prose-content a { color: var(--color-primary); text-decoration: underline; }
+  .prose-editor blockquote, .prose-content blockquote {
+    border-left: 3px solid var(--color-primary);
+    padding-left: 1em;
+    color: var(--color-muted-foreground);
+    margin: 0.6em 0;
+  }
+  .prose-editor img, .prose-content img { max-width: 100%; border-radius: 10px; margin: 0.5em 0; }
+  .prose-content { line-height: 1.7; }
+}
+
+/* ---------- Motion & premium utilities ---------- */
+/* Scroll-reveal: only hides content when JS + motion are available, so no-JS
+   and reduced-motion visitors always see everything. */
+@media (prefers-reduced-motion: no-preference) and (scripting: enabled) {
+  .reveal {
+    opacity: 0;
+    transform: translateY(20px);
+    transition: opacity 0.7s ease, transform 0.7s cubic-bezier(0.2, 0.7, 0.2, 1);
+    will-change: opacity, transform;
+  }
+  .reveal.is-visible {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+@layer utilities {
+  /* Gradient text using the theme accents. */
+  .bf-gradient-text {
+    background-image: linear-gradient(120deg, var(--color-primary), var(--color-brand));
+    -webkit-background-clip: text;
+    background-clip: text;
+    color: transparent;
+  }
+  /* Slow float for hero glows / decorative blobs. */
+  .bf-float { animation: bf-float 9s ease-in-out infinite; }
+  @keyframes bf-float {
+    0%, 100% { transform: translateY(0); }
+    50% { transform: translateY(-14px); }
+  }
+  /* Shimmering skeleton loader. */
+  .bf-shimmer {
+    background: linear-gradient(100deg, var(--color-muted) 30%, color-mix(in srgb, var(--color-foreground) 8%, var(--color-muted)) 50%, var(--color-muted) 70%);
+    background-size: 200% 100%;
+    animation: bf-shimmer 1.4s linear infinite;
+  }
+  @keyframes bf-shimmer {
+    to { background-position: -200% 0; }
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  .bf-float { animation: none; }
+}
