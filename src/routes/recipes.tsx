@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { Img } from "@/components/site/Img";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { listRecipes } from "@/lib/catalog.functions";
 import { ChefHat, Clock } from "lucide-react";
@@ -33,7 +34,7 @@ function RecipesList() {
               <Link key={p.id} to="/blog/$slug" params={{ slug: p.slug }} className="group bg-card border rounded-2xl overflow-hidden hover:shadow-xl transition">
                 <div className="aspect-[16/10] overflow-hidden bg-muted">
                   {p.coverImage ? (
-                    <img src={p.coverImage} alt={p.title} className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                    <Img src={p.coverImage} alt={p.title} width={600} height={400} sizes="(max-width: 768px) 100vw, 33vw" widths={[300, 600]} className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500" />
                   ) : (
                     <div className="h-full w-full grid place-items-center text-muted-foreground"><ChefHat className="h-10 w-10 opacity-40" /></div>
                   )}

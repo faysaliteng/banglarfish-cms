@@ -1,4 +1,5 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
+import { Img } from "@/components/site/Img";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { useCart, cart, cartTotals, formatBDT } from "@/lib/cart";
 import { useEffect, useState, useRef } from "react";
@@ -183,7 +184,7 @@ function Checkout() {
             <ul className="space-y-3 text-sm max-h-72 overflow-auto">
               {lines.map((l) => (
                 <li key={l.productId + l.weight} className="flex gap-3">
-                  <img src={l.image} alt={l.name} className="h-12 w-12 rounded object-cover" />
+                  <Img src={l.image} alt={l.name} width={96} height={96} sizes="48px" widths={[48, 96]} className="h-12 w-12 rounded object-cover" />
                   <div className="flex-1">
                     <p className="font-medium leading-tight">{l.name}</p>
                     <p className="text-xs text-muted-foreground">{l.weight} × {l.qty}</p>

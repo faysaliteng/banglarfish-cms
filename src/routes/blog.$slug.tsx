@@ -1,4 +1,5 @@
 import { renderTitle } from "@/lib/seo-title";
+import { Img } from "@/components/site/Img";
 import { getSeo } from "@/lib/site.functions";
 import { createFileRoute, notFound, Link } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
@@ -72,7 +73,7 @@ function BlogPost() {
         )}
         <h1 className="text-3xl md:text-4xl font-bold mt-1 break-words">{post.title}</h1>
         <p className="text-sm text-muted-foreground mt-2">{post.author}{post.publishedAt ? ` · ${new Date(post.publishedAt).toLocaleDateString()}` : ""}</p>
-        {post.coverImage && <img src={post.coverImage} alt={post.title} className="w-full rounded-2xl mt-6 object-cover max-h-[420px]" />}
+        {post.coverImage && <Img src={post.coverImage} alt={post.title} priority width={1200} height={630} sizes="(max-width: 1024px) 100vw, 800px" widths={[600, 900, 1200]} className="w-full rounded-2xl mt-6 object-cover max-h-[420px]" />}
         {looksLikeHtml(post.body) ? (
           <div className="prose-content mt-6" dangerouslySetInnerHTML={{ __html: sanitizeHtml(post.body) }} />
         ) : (

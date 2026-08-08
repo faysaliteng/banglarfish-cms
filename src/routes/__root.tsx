@@ -101,6 +101,15 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
   );
 }
 
+// Serve the favicon/apple-touch-icon at the size it is actually painted, via the
+// disk-cached transform route. Local paths only — an absolute external URL is
+// passed through untouched.
+function iconUrl(src: string | undefined, w: number): string {
+  const path = src || "/img/favicon.png";
+  if (!path.startsWith("/")) return path;
+  return `/media/tr?src=${encodeURIComponent(path)}&w=${w}&f=png`;
+}
+
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   loader: async () => {
     const [theme, seo, branding, customCode, settings, i18n] = await Promise.all([getTheme(), getSeo(), getBranding(), getCustomCodePublic(), getSettings(), getI18nState()]);
@@ -125,8 +134,11 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
     ],
     links: [
       { rel: "stylesheet", href: appCss },
-      { rel: "icon", type: "image/png", href: loaderData?.branding?.favicon ?? "/img/favicon.png" },
-      { rel: "apple-touch-icon", type: "image/png", href: loaderData?.branding?.favicon ?? "/img/favicon.png" },
+      // Downscale the icon through the image transform. The uploaded master is
+      // typically 1024x1024 (~750KB) but is painted at 16-32px, and the browser
+      // fetches it during the initial navigation — competing with the LCP image.
+      { rel: "icon", type: "image/png", href: iconUrl(loaderData?.branding?.favicon, 32) },
+      { rel: "apple-touch-icon", type: "image/png", href: iconUrl(loaderData?.branding?.favicon, 180) },
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Montserrat:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700;800&family=Hind+Siliguri:wght@400;500;600;700&display=swap" },

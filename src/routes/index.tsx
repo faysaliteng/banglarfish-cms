@@ -9,6 +9,7 @@ import { toast } from "sonner";
 import { Reveal } from "@/components/site/Reveal";
 import { useI18n } from "@/lib/i18n";
 import { Banners } from "@/components/site/Banners";
+import { Img } from "@/components/site/Img";
 import { CountUp } from "@/components/site/CountUp";
 import type { Homepage, ThemeHero, Product, BlogPost } from "@/lib/types";
 
@@ -98,7 +99,7 @@ function Home() {
             <Reveal key={c.slug} delay={(i % 6) * 60}>
               <Link to="/category/$slug" params={{ slug: c.slug }} className="group text-center block">
                 <div className="aspect-square rounded-2xl overflow-hidden bg-muted mb-3 border group-hover:border-primary transition group-hover:-translate-y-1 group-hover:shadow-xl duration-300">
-                  <img src={c.image} alt={c.name} loading="lazy" className="h-full w-full object-cover group-hover:scale-110 transition-transform duration-500" />
+                  <Img src={c.image} alt={c.name} width={400} height={400} sizes="(max-width: 768px) 50vw, 16vw" widths={[200, 400]} className="h-full w-full object-cover group-hover:scale-110 transition-transform duration-500" />
                 </div>
                 <p className="font-semibold text-sm group-hover:text-primary">{c.name}</p>
                 <p className="text-xs text-muted-foreground" style={{ fontFamily: "var(--font-bangla)" }}>{c.bn}</p>
@@ -232,7 +233,7 @@ function Hero({ h, hero }: { h: Homepage; hero: ThemeHero }) {
     return (
       <section className="relative">
         <div className="relative h-[520px] md:h-[600px] overflow-hidden">
-          <img src={h.heroImage} alt="Fresh fish" className="absolute inset-0 h-full w-full object-cover" />
+          <Img src={h.heroImage} alt="Fresh fish" priority width={1600} height={900} sizes="100vw" widths={[800, 1200, 1600]} className="absolute inset-0 h-full w-full object-cover" />
           <div className="absolute inset-0 bg-gradient-to-r from-black/70 via-black/40 to-transparent" />
           <div className="container-x relative h-full flex items-center">
             <div className="max-w-xl bg-card/80 backdrop-blur-md rounded-2xl p-6 sm:p-8 border shadow-2xl">
@@ -260,7 +261,7 @@ function Hero({ h, hero }: { h: Homepage; hero: ThemeHero }) {
           </div>
           <div className="mt-12 relative max-w-4xl mx-auto">
             <div className="absolute inset-0 bg-primary/20 blur-3xl rounded-full" />
-            <img src={h.heroImage} alt="Fresh fish on ice" className="relative rounded-2xl shadow-2xl w-full object-cover max-h-[380px]" />
+            <Img src={h.heroImage} alt="Fresh fish on ice" priority width={1200} height={760} sizes="(max-width: 1024px) 100vw, 50vw" widths={[600, 900, 1200]} className="relative rounded-2xl shadow-2xl w-full object-cover max-h-[380px]" />
           </div>
         </div>
       </section>
@@ -295,7 +296,7 @@ function Hero({ h, hero }: { h: Homepage; hero: ThemeHero }) {
           <div className="relative mt-12 max-w-3xl mx-auto">
             <div className="absolute -inset-5 rounded-[2rem] blur-2xl opacity-50" style={{ background: "conic-gradient(from 90deg, var(--primary), var(--accent2), var(--brand), var(--primary))" }} />
             <div className="relative bg-card rounded-2xl p-2">
-              <img src={h.heroImage} alt="Fresh fish on ice" className="rounded-xl w-full object-cover max-h-[360px]" />
+              <Img src={h.heroImage} alt="Fresh fish on ice" priority width={1200} height={720} sizes="(max-width: 1024px) 100vw, 50vw" widths={[600, 900, 1200]} className="rounded-xl w-full object-cover max-h-[360px]" />
             </div>
           </div>
           <HeroStats h={h} center />
@@ -317,7 +318,7 @@ function Hero({ h, hero }: { h: Homepage; hero: ThemeHero }) {
           <div className="relative h-[280px] md:h-[440px]">
             <div className="absolute -inset-3 rounded-2xl blur-2xl opacity-40" style={{ background: "linear-gradient(135deg, var(--primary), var(--brand))" }} />
             <div className="relative h-full overflow-hidden rounded-2xl md:[clip-path:polygon(14%_0,100%_0,100%_100%,0_100%)]">
-              <img src={h.heroImage} alt="Fresh fish on ice" className="h-full w-full object-cover" />
+              <Img src={h.heroImage} alt="Fresh fish on ice" priority width={1200} height={800} sizes="(max-width: 1024px) 100vw, 50vw" widths={[600, 900, 1200]} className="h-full w-full object-cover" />
             </div>
           </div>
         </div>
@@ -337,7 +338,7 @@ function Hero({ h, hero }: { h: Homepage; hero: ThemeHero }) {
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="bg-card rounded-2xl overflow-hidden row-span-2">
-              <img src={h.heroImage} alt="Fresh fish" className="h-full w-full object-cover min-h-[260px]" />
+              <Img src={h.heroImage} alt="Fresh fish" priority width={1200} height={800} sizes="(max-width: 1024px) 100vw, 50vw" widths={[600, 900, 1200]} className="h-full w-full object-cover min-h-[260px]" />
             </div>
             <div className="bg-card rounded-2xl p-5 flex flex-col justify-center">
               <p className="text-3xl font-bold text-primary">{h.stats[0]?.n ?? "10K+"}</p>
@@ -389,7 +390,7 @@ function Hero({ h, hero }: { h: Homepage; hero: ThemeHero }) {
         </div>
         <div className="relative">
           <div className="absolute inset-0 bg-primary/20 blur-3xl rounded-full" />
-          <img src={h.heroImage} alt="Fresh fish on ice" width={1600} height={1000} className="relative rounded-2xl shadow-2xl w-full h-auto max-w-full" />
+          <Img src={h.heroImage} alt="Fresh fish on ice" priority width={1600} height={1000} sizes="(max-width: 1024px) 100vw, 50vw" widths={[600, 900, 1200, 1600]} className="relative rounded-2xl shadow-2xl w-full h-auto max-w-full" />
         </div>
       </div>
     </section>
@@ -465,7 +466,7 @@ function RecipeSection({ h, recipes }: { h: Homepage; recipes: BlogPost[] }) {
             <Link to="/blog/$slug" params={{ slug: p.slug }} className="group bg-card border rounded-2xl overflow-hidden block h-full">
               <div className="aspect-[16/10] overflow-hidden bg-muted">
                 {p.coverImage ? (
-                  <img src={p.coverImage} alt={p.title} className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                  <Img src={p.coverImage} alt={p.title} width={600} height={400} sizes="(max-width: 768px) 100vw, 33vw" widths={[300, 600]} className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500" />
                 ) : (
                   <div className="h-full w-full grid place-items-center text-muted-foreground"><ChefHat className="h-10 w-10 opacity-40" /></div>
                 )}
@@ -494,7 +495,7 @@ function BlogSection({ h, posts }: { h: Homepage; posts: BlogPost[] }) {
             <Link to="/blog/$slug" params={{ slug: p.slug }} className="group bg-card border rounded-2xl overflow-hidden block h-full">
               {p.coverImage && (
                 <div className="aspect-[16/9] overflow-hidden bg-muted">
-                  <img src={p.coverImage} alt={p.title} className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                  <Img src={p.coverImage} alt={p.title} width={600} height={400} sizes="(max-width: 768px) 100vw, 33vw" widths={[300, 600]} className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500" />
                 </div>
               )}
               <div className="p-4">

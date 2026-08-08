@@ -1,4 +1,5 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
+import { Img } from "@/components/site/Img";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { listBlog } from "@/lib/catalog.functions";
 import { X } from "lucide-react";
@@ -64,7 +65,7 @@ function BlogList() {
               <Link key={p.id} to="/blog/$slug" params={{ slug: p.slug }} className="group bg-card border rounded-2xl overflow-hidden hover:shadow-lg transition">
                 {p.coverImage && (
                   <div className="aspect-[16/9] overflow-hidden bg-muted">
-                    <img src={p.coverImage} alt={p.title} className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500" />
+                    <Img src={p.coverImage} alt={p.title} width={600} height={400} sizes="(max-width: 768px) 100vw, 33vw" widths={[300, 600]} className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500" />
                   </div>
                 )}
                 <div className="p-4">

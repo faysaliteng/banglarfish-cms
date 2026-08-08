@@ -2,6 +2,7 @@ import { createFileRoute, Link } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { useCart, cart, cartTotals, formatBDT } from "@/lib/cart";
 import { useI18n } from "@/lib/i18n";
+import { Img } from "@/components/site/Img";
 import { Minus, Plus, X, ShoppingBag } from "lucide-react";
 
 export const Route = createFileRoute("/cart")({
@@ -35,7 +36,7 @@ function CartPage() {
           <div className="border rounded-xl divide-y">
             {lines.map((l) => (
               <div key={l.productId + l.weight} className="p-4 flex flex-wrap gap-4 items-center">
-                <img src={l.image} alt={l.name} className="h-20 w-20 rounded-md object-cover shrink-0" />
+                <Img src={l.image} alt={l.name} width={160} height={160} sizes="80px" widths={[80, 160]} className="h-20 w-20 rounded-md object-cover shrink-0" />
                 <div className="flex-1 min-w-[8rem]">
                   <Link to="/product/$slug" params={{ slug: l.slug }} className="font-semibold hover:text-primary break-words">{l.name}</Link>
                   <p className="text-xs text-muted-foreground">Weight: {l.weight}</p>
