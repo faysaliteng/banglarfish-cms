@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Crop as CropIcon, RotateCcw, RotateCw, FlipHorizontal, FlipVertical, Sliders,
-  Maximize2, Download, X, Check, RefreshCw, Wand2,
+  Maximize2, Download, X, Check, RefreshCw, Wand2, Scissors, PenLine, Sparkles, Trash2, Undo2,
 } from "lucide-react";
+import { useServerFn } from "@tanstack/react-start";
+import { aiImageStatus, aiEditImage } from "@/lib/ai.functions";
+import { removeBackground, fillTransparent, drawMarkups, dataUrlBytes, prettyBytes, type Markup, type MarkupKind } from "./image-tools";
+import { toast } from "sonner";
 
 /**
  * Self-contained image editor (canvas + 2D context — no external libraries).
@@ -48,7 +52,23 @@ export function ImageEditor({
   onClose: () => void;
 }) {
   const [img, setImg] = useState<HTMLImageElement | null>(null);
-  const [tab, setTab] = useState<"crop" | "adjust" | "resize">("crop");
+  const [tab, setTab] = useState<"crop" | "adjust" | "bg" | "markup" | "resize">("crop");
+  // The working source. Background removal and AI edits replace it, so every
+  // later operation (crop, markup, export) builds on the new pixels.
+  const [workSrc, setWorkSrc] = useState(src);
+  const [bgTolerance, setBgTolerance] = useState(28);
+  const [bgFeather, setBgFeather] = useState(2);
+  const [bgFill, setBgFill] = useState("");
+  const [markups, setMarkups] = useState<Markup[]>([]);
+  const [tool, setTool] = useState<MarkupKind>("arrow");
+  const [mColor, setMColor] = useState("#ef4444");
+  const [mSize, setMSize] = useState(40);
+  const [mText, setMText] = useState("SALE");
+  const [drawing, setDrawing] = useState<Markup | null>(null);
+  const [aiOn, setAiOn] = useState(false);
+  const [aiBusy, setAiBusy] = useState(false);
+  const [estimate, setEstimate] = useState("");
+  const history = useRef<string[]>([]);
   const [crop, setCrop] = useState<CropRect>(FULL);
   const [aspect, setAspect] = useState<number | null>(null);
   const [rotation, setRotation] = useState(0);          // degrees, any value
@@ -71,8 +91,12 @@ export function ImageEditor({
     i.crossOrigin = "anonymous";
     i.onload = () => { setImg(i); setOutW(i.naturalWidth); setOutH(i.naturalHeight); };
     i.onerror = () => setImg(null);
-    i.src = src;
-  }, [src]);
+    i.src = workSrc;
+  }, [workSrc]);
+
+  const aiStatusFn = useServerFn(aiImageStatus);
+  const aiEditFn = useServerFn(aiEditImage);
+  useEffect(() => { aiStatusFn().then((r) => setAiOn(r.enabled)).catch(() => setAiOn(false)); }, [aiStatusFn]);
 
   const filterCss = useMemo(() => {
     const p = PRESETS.find((x) => x.id === preset)?.css ?? "";
@@ -144,13 +168,24 @@ export function ImageEditor({
     const sw = Math.max(1, crop.w * img.naturalWidth);
     const sh = Math.max(1, crop.h * img.naturalHeight);
 
-    // Stage 1 — crop + colour, at source resolution.
+    // Stage 0 — full-size plate: colour-graded image, then markups on top.
+    // Markups live in full-image coordinates so what you drew is what gets
+    // cropped, and they are drawn unfiltered (a red arrow shouldn't go B&W).
+    const c0 = document.createElement("canvas");
+    c0.width = img.naturalWidth; c0.height = img.naturalHeight;
+    const x0 = c0.getContext("2d", { willReadFrequently: true });
+    if (!x0) return null;
+    x0.filter = filterCss || "none";
+    x0.drawImage(img, 0, 0);
+    x0.filter = "none";
+    if (markups.length) drawMarkups(x0, c0.width, c0.height, markups);
+
+    // Stage 1 — crop, at source resolution.
     const c1 = document.createElement("canvas");
     c1.width = Math.round(sw); c1.height = Math.round(sh);
     const x1 = c1.getContext("2d");
     if (!x1) return null;
-    x1.filter = filterCss || "none";
-    x1.drawImage(img, sx, sy, sw, sh, 0, 0, c1.width, c1.height);
+    x1.drawImage(c0, sx, sy, sw, sh, 0, 0, c1.width, c1.height);
 
     // Stage 2 — rotate + flip on a canvas big enough for the rotated bounds.
     const rad = (rotation * Math.PI) / 180;
@@ -179,7 +214,83 @@ export function ImageEditor({
     // Stage 4 — optional unsharp mask (convolution; CSS filters can't sharpen).
     if (adj.sharpen > 0) applySharpen(x3, tw, th, adj.sharpen / 100);
     return c3;
-  }, [img, crop, filterCss, rotation, flipH, flipV, outW, outH, adj.sharpen]);
+  }, [img, crop, filterCss, rotation, flipH, flipV, outW, outH, adj.sharpen, markups]);
+
+  /* ---------- destructive edits: replace the working pixels ---------- */
+  const pushWork = useCallback((next: string) => {
+    history.current.push(workSrc);
+    setWorkSrc(next);
+    setCrop(FULL);
+  }, [workSrc]);
+
+  const baseCanvas = useCallback(() => {
+    if (!img) return null;
+    const c = document.createElement("canvas");
+    c.width = img.naturalWidth; c.height = img.naturalHeight;
+    const x = c.getContext("2d", { willReadFrequently: true });
+    if (!x) return null;
+    x.drawImage(img, 0, 0);
+    return { c, x };
+  }, [img]);
+
+  async function cutOutBackground(fill?: string) {
+    const b = baseCanvas();
+    if (!b) return;
+    setBusy(true);
+    // Yield a frame so the button's busy state actually paints before the
+    // flood fill blocks the main thread on a large image.
+    await new Promise((r) => setTimeout(r, 30));
+    try {
+      removeBackground(b.x, b.c.width, b.c.height, { tolerance: bgTolerance, feather: bgFeather });
+      if (fill) fillTransparent(b.x, b.c.width, b.c.height, fill);
+      pushWork(b.c.toDataURL("image/png"));
+      if (!fill) setFormat("image/png");   // only PNG/WebP keep the alpha channel
+      toast.success(fill ? "Background replaced" : "Background removed");
+    } catch {
+      toast.error("Could not process this image");
+    } finally { setBusy(false); }
+  }
+
+  async function runAiEdit(instruction: string) {
+    if (!img || !instruction.trim()) return;
+    setAiBusy(true);
+    try {
+      // Send at most 1536px on the long edge: the providers work at ~1024 anyway
+      // and a full-resolution PNG blows past the request size limit.
+      const scale = Math.min(1, 1536 / Math.max(img.naturalWidth, img.naturalHeight));
+      const c = document.createElement("canvas");
+      c.width = Math.round(img.naturalWidth * scale);
+      c.height = Math.round(img.naturalHeight * scale);
+      const x = c.getContext("2d");
+      if (!x) return;
+      x.imageSmoothingQuality = "high";
+      x.drawImage(img, 0, 0, c.width, c.height);
+      const r = await aiEditFn({ data: { dataUrl: c.toDataURL("image/png"), instruction } });
+      pushWork(r.dataUrl);
+      toast.success("AI edit applied");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "AI edit failed");
+    } finally { setAiBusy(false); }
+  }
+
+  function undoWork() {
+    const prev = history.current.pop();
+    if (!prev) return;
+    setWorkSrc(prev);
+    setCrop(FULL);
+  }
+
+  // Compression preview. Encoding is not free, so it is debounced and only runs
+  // while the Export tab is open.
+  useEffect(() => {
+    if (tab !== "resize" || !img) { setEstimate(""); return; }
+    const t = setTimeout(() => {
+      const c = render();
+      if (!c) return;
+      try { setEstimate(prettyBytes(dataUrlBytes(c.toDataURL(format, quality)))); } catch { setEstimate(""); }
+    }, 300);
+    return () => clearTimeout(t);
+  }, [tab, img, render, format, quality]);
 
   async function save() {
     const canvas = render();
@@ -203,7 +314,7 @@ export function ImageEditor({
 
   function resetAll() {
     setCrop(FULL); setAspect(null); setRotation(0); setFlipH(false); setFlipV(false);
-    setAdj(NEUTRAL); setPreset("none");
+    setAdj(NEUTRAL); setPreset("none"); setMarkups([]);
     if (img) { setOutW(img.naturalWidth); setOutH(img.naturalHeight); }
   }
 
@@ -221,6 +332,88 @@ export function ImageEditor({
       setOutW(Math.round(v * ratio));
     }
   };
+
+  /* ---------- markup: place on the stage, store normalised ---------- */
+  const overlayRef = useRef<HTMLCanvasElement>(null);
+  const [stageSize, setStageSize] = useState({ w: 0, h: 0 });
+  useEffect(() => {
+    const el = stageRef.current;
+    if (!el) return;
+    const ro = new ResizeObserver(() => {
+      const r = el.getBoundingClientRect();
+      setStageSize({ w: Math.round(r.width), h: Math.round(r.height) });
+    });
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, [img]);
+
+  // Undo the display transform so a click lands where the user sees it, not
+  // where the untransformed layout box happens to be.
+  const stagePoint = (e: React.PointerEvent) => {
+    const box = stageRef.current?.getBoundingClientRect();
+    if (!box) return { x: 0, y: 0 };
+    const px = e.clientX - box.left - box.width / 2;
+    const py = e.clientY - box.top - box.height / 2;
+    const rad = (-rotation * Math.PI) / 180;
+    let rx = px * Math.cos(rad) - py * Math.sin(rad);
+    let ry = px * Math.sin(rad) + py * Math.cos(rad);
+    if (flipH) rx = -rx;
+    if (flipV) ry = -ry;
+    return {
+      x: Math.min(1, Math.max(0, rx / box.width + 0.5)),
+      y: Math.min(1, Math.max(0, ry / box.height + 0.5)),
+    };
+  };
+
+  const markupDown = (e: React.PointerEvent) => {
+    if (tab !== "markup") return;
+    e.preventDefault();
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    const p = stagePoint(e);
+    setDrawing({
+      id: `m${markups.length}-${Math.round(p.x * 1e4)}`,
+      kind: tool, x: p.x, y: p.y, x2: p.x, y2: p.y,
+      color: mColor, size: mSize,
+      text: tool === "text" || tool === "badge" ? mText : undefined,
+    });
+  };
+  const markupMove = (e: React.PointerEvent) => {
+    if (!drawing) return;
+    const p = stagePoint(e);
+    setDrawing({ ...drawing, x2: p.x, y2: p.y });
+  };
+  const markupUp = () => {
+    if (!drawing) return;
+    const tiny = Math.abs(drawing.x2 - drawing.x) < 0.005 && Math.abs(drawing.y2 - drawing.y) < 0.005;
+    // Text and badges are anchored by a single click; shapes need a drag.
+    if (!tiny || drawing.kind === "text" || drawing.kind === "badge") {
+      setMarkups((m) => [...m, drawing]);
+    }
+    setDrawing(null);
+  };
+
+  // Live preview of the annotations, drawn at display resolution over the image.
+  useEffect(() => {
+    const cv = overlayRef.current;
+    if (!cv || !img || !stageSize.w) return;
+    cv.width = stageSize.w; cv.height = stageSize.h;
+    const x = cv.getContext("2d", { willReadFrequently: true });
+    if (!x) return;
+    x.clearRect(0, 0, cv.width, cv.height);
+    const all = drawing ? [...markups, drawing] : markups;
+    // Pixelate markups sample from the canvas, so seed those regions with the
+    // real image first — otherwise they'd blur transparent pixels.
+    for (const m of all) {
+      if (m.kind !== "blur") continue;
+      const rx = Math.min(m.x, m.x2), ry = Math.min(m.y, m.y2);
+      const rw = Math.abs(m.x2 - m.x), rh = Math.abs(m.y2 - m.y);
+      if (rw <= 0 || rh <= 0) continue;
+      x.drawImage(img,
+        rx * img.naturalWidth, ry * img.naturalHeight, rw * img.naturalWidth, rh * img.naturalHeight,
+        rx * cv.width, ry * cv.height, rw * cv.width, rh * cv.height);
+    }
+    drawMarkups(x, cv.width, cv.height, all);
+  }, [markups, drawing, img, stageSize]);
 
   const cropPx = img ? { w: Math.round(crop.w * img.naturalWidth), h: Math.round(crop.h * img.naturalHeight) } : { w: 0, h: 0 };
 
@@ -247,11 +440,25 @@ export function ImageEditor({
             ) : (
               <div ref={stageRef} className="relative select-none touch-none" style={{ maxWidth: "100%" }}>
                 <img
-                  src={src} alt=""
+                  src={workSrc} alt=""
                   className="block max-h-[60vh] max-w-full"
                   style={{ filter: filterCss || undefined, transform: `rotate(${rotation}deg) scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})` }}
                   draggable={false}
                 />
+                <canvas
+                  ref={overlayRef}
+                  className="absolute inset-0 h-full w-full"
+                  style={{ transform: `rotate(${rotation}deg) scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})`, pointerEvents: "none" }}
+                />
+                {tab === "markup" && (
+                  <div
+                    className="absolute inset-0 cursor-crosshair"
+                    onPointerDown={markupDown}
+                    onPointerMove={markupMove}
+                    onPointerUp={markupUp}
+                    onPointerCancel={markupUp}
+                  />
+                )}
                 {tab === "crop" && (
                   <>
                     {/* dimmed outside area */}
@@ -296,8 +503,8 @@ export function ImageEditor({
           {/* controls */}
           <div className="border-l bg-card overflow-y-auto">
             <div className="flex border-b sticky top-0 bg-card z-10">
-              {([["crop", CropIcon, "Crop"], ["adjust", Sliders, "Adjust"], ["resize", Maximize2, "Export"]] as const).map(([k, Icon, label]) => (
-                <button key={k} onClick={() => setTab(k)} className={`flex-1 py-2.5 text-xs font-semibold inline-flex items-center justify-center gap-1.5 ${tab === k ? "text-primary border-b-2 border-primary" : "text-muted-foreground hover:bg-muted"}`}>
+              {([["crop", CropIcon, "Crop"], ["adjust", Sliders, "Adjust"], ["bg", Scissors, "Cut-out"], ["markup", PenLine, "Markup"], ["resize", Maximize2, "Export"]] as const).map(([k, Icon, label]) => (
+                <button key={k} onClick={() => setTab(k)} className={`flex-1 py-2.5 text-[11px] font-semibold inline-flex flex-col items-center justify-center gap-1 ${tab === k ? "text-primary border-b-2 border-primary" : "text-muted-foreground hover:bg-muted"}`}>
                   <Icon className="h-4 w-4" /> {label}
                 </button>
               ))}
@@ -345,6 +552,99 @@ export function ImageEditor({
                 </>
               )}
 
+              {tab === "bg" && (
+                <>
+                  <p className="text-[11px] text-muted-foreground">
+                    Removes the backdrop behind the subject. It fills inward from the edges, so a
+                    white plate <em>inside</em> the product is kept &mdash; only the surrounding
+                    background goes.
+                  </p>
+                  <Slider label="Tolerance" value={bgTolerance} min={2} max={70} onChange={setBgTolerance} unit="%" />
+                  <Slider label="Edge softness" value={bgFeather} min={0} max={8} onChange={setBgFeather} unit="px" />
+                  <button onClick={() => cutOutBackground()} disabled={busy || !img} className="w-full inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground text-sm font-semibold py-2 rounded-md disabled:opacity-60">
+                    <Scissors className="h-4 w-4" /> {busy ? "Working\u2026" : "Remove background"}
+                  </button>
+                  <Field label="Or replace it with a colour">
+                    <div className="grid grid-cols-4 gap-1.5">
+                      {["#ffffff", "#f1f5f9", "#0f172a", "#0ea5b7"].map((c) => (
+                        <button key={c} onClick={() => cutOutBackground(c)} disabled={busy} className="h-8 rounded-md border disabled:opacity-60" style={{ background: c }} title="Replace background with this colour" />
+                      ))}
+                    </div>
+                    <div className="flex items-center gap-2 mt-2">
+                      <input type="color" value={bgFill || "#ffffff"} onChange={(e) => setBgFill(e.target.value)} className="h-8 w-10 border rounded" />
+                      <button onClick={() => cutOutBackground(bgFill || "#ffffff")} disabled={busy} className="flex-1 text-xs py-1.5 rounded-md border hover:bg-muted disabled:opacity-60">Apply custom colour</button>
+                    </div>
+                  </Field>
+                  <div className="border-t pt-3">
+                    <p className="text-xs font-semibold mb-1.5 inline-flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-primary" /> AI edit</p>
+                    {aiOn ? (
+                      <>
+                        <p className="text-[11px] text-muted-foreground mb-2">Describe the change in plain English &mdash; background, lighting, cleanup, anything.</p>
+                        <div className="grid grid-cols-1 gap-1.5">
+                          {[
+                            ["Remove the background completely and leave the subject on a transparent background", "Cut out subject (AI)"],
+                            ["Replace the background with a clean seamless white studio backdrop", "White studio backdrop"],
+                            ["Improve the lighting and colour so this looks like a professional product photo", "Pro product lighting"],
+                          ].map(([instr, label]) => (
+                            <button key={label} onClick={() => runAiEdit(instr)} disabled={aiBusy} className="text-xs py-1.5 rounded-md border hover:bg-muted disabled:opacity-60">{aiBusy ? "Generating\u2026" : label}</button>
+                          ))}
+                        </div>
+                        <input
+                          placeholder="Custom instruction, then press Enter\u2026"
+                          disabled={aiBusy}
+                          onKeyDown={(e) => { if (e.key === "Enter") { const el = e.target as HTMLInputElement; runAiEdit(el.value); el.value = ""; } }}
+                          className="w-full border rounded-md px-2 py-1.5 text-xs mt-2"
+                        />
+                      </>
+                    ) : (
+                      <p className="text-[11px] text-muted-foreground">Add a Gemini or OpenAI image key in <strong>Settings &rarr; AI</strong> to enable AI background replacement and retouching.</p>
+                    )}
+                  </div>
+                  {history.current.length > 0 && (
+                    <button onClick={undoWork} className="w-full text-xs py-2 rounded-md border hover:bg-muted inline-flex items-center justify-center gap-1.5"><Undo2 className="h-3.5 w-3.5" /> Undo last cut-out / AI edit</button>
+                  )}
+                </>
+              )}
+
+              {tab === "markup" && (
+                <>
+                  <Field label="Tool">
+                    <div className="grid grid-cols-3 gap-1.5">
+                      {([["arrow", "Arrow"], ["line", "Line"], ["rect", "Box"], ["ellipse", "Circle"], ["text", "Text"], ["badge", "Badge"], ["blur", "Pixelate"]] as const).map(([k, l]) => (
+                        <button key={k} onClick={() => setTool(k)} className={`text-xs py-1.5 rounded-md border ${tool === k ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted"}`}>{l}</button>
+                      ))}
+                    </div>
+                  </Field>
+                  <p className="text-[11px] text-muted-foreground">
+                    {tool === "text" || tool === "badge" ? "Click on the image to place it." : "Drag on the image to draw."}
+                  </p>
+                  {(tool === "text" || tool === "badge") && (
+                    <Field label="Label">
+                      <input value={mText} onChange={(e) => setMText(e.target.value)} className="w-full border rounded-md px-2 py-1.5 text-sm" />
+                      <div className="grid grid-cols-4 gap-1.5 mt-1.5">
+                        {["SALE", "NEW", "-20%", "FREE"].map((t) => (
+                          <button key={t} onClick={() => setMText(t)} className="text-xs py-1.5 rounded-md border hover:bg-muted">{t}</button>
+                        ))}
+                      </div>
+                    </Field>
+                  )}
+                  <Field label="Colour">
+                    <div className="flex items-center gap-1.5">
+                      {["#ef4444", "#0ea5b7", "#f59e0b", "#22c55e", "#0f172a", "#ffffff"].map((c) => (
+                        <button key={c} onClick={() => setMColor(c)} className={`h-7 flex-1 rounded-md border-2 ${mColor === c ? "border-primary" : "border-transparent ring-1 ring-border"}`} style={{ background: c }} />
+                      ))}
+                      <input type="color" value={mColor} onChange={(e) => setMColor(e.target.value)} className="h-7 w-8 border rounded shrink-0" />
+                    </div>
+                  </Field>
+                  <Slider label={tool === "blur" ? "Pixel size" : "Size"} value={mSize} min={5} max={100} onChange={setMSize} />
+                  <div className="flex gap-1.5">
+                    <button onClick={() => setMarkups((m) => m.slice(0, -1))} disabled={!markups.length} className="flex-1 text-xs py-2 rounded-md border hover:bg-muted disabled:opacity-50 inline-flex items-center justify-center gap-1.5"><Undo2 className="h-3.5 w-3.5" /> Undo</button>
+                    <button onClick={() => setMarkups([])} disabled={!markups.length} className="flex-1 text-xs py-2 rounded-md border hover:bg-muted disabled:opacity-50 inline-flex items-center justify-center gap-1.5 text-destructive"><Trash2 className="h-3.5 w-3.5" /> Clear all</button>
+                  </div>
+                  <p className="text-[11px] text-muted-foreground">{markups.length} annotation{markups.length === 1 ? "" : "s"}. They are baked into the image when you save or download.</p>
+                </>
+              )}
+
               {tab === "resize" && (
                 <>
                   <Field label="Output size">
@@ -373,8 +673,28 @@ export function ImageEditor({
                     <p className="text-[11px] text-muted-foreground mt-1.5">WebP gives the smallest file at the same quality. Use PNG only when you need transparency.</p>
                   </Field>
                   {format !== "image/png" && (
-                    <Slider label="Quality" value={Math.round(quality * 100)} min={40} max={100} onChange={(v) => setQuality(v / 100)} unit="%" />
+                    <>
+                      <Slider label="Quality" value={Math.round(quality * 100)} min={40} max={100} onChange={(v) => setQuality(v / 100)} unit="%" />
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {([[0.95, "Max"], [0.82, "Balanced"], [0.65, "Small"]] as const).map(([q, l]) => (
+                          <button key={l} onClick={() => setQuality(q)} className={`text-xs py-1.5 rounded-md border ${Math.abs(quality - q) < 0.01 ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted"}`}>{l}</button>
+                        ))}
+                      </div>
+                    </>
                   )}
+                  <div className="rounded-lg border bg-muted/40 p-3 text-xs space-y-1">
+                    <div className="flex items-center justify-between">
+                      <span className="text-muted-foreground">Estimated file size</span>
+                      <strong>{estimate || "\u2026"}</strong>
+                    </div>
+                    <p className="text-[11px] text-muted-foreground">
+                      Balanced WebP is usually 60&ndash;80% smaller than the original JPEG with no
+                      visible difference. Saved images are compressed again on the server.
+                    </p>
+                  </div>
+                  <button onClick={download} disabled={!img} className="w-full inline-flex items-center justify-center gap-2 border text-sm font-semibold py-2 rounded-md hover:bg-muted disabled:opacity-60">
+                    <Download className="h-4 w-4" /> Download{estimate ? ` (${estimate})` : ""}
+                  </button>
                 </>
               )}
             </div>

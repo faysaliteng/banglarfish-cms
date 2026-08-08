@@ -93,6 +93,53 @@ function AiPage() {
         </label>
       </div>
       <p className="text-xs text-muted-foreground mt-3">Guardrail: every AI output is a <strong>suggestion</strong> you insert manually into the editor — nothing is auto-published.</p>
+
+      {/* Image generation is its own provider: Claude writes copy but cannot
+          draw, so the text model and the image model are configured apart. */}
+      <div className="mt-6 rounded-xl border bg-card p-5">
+        <h2 className="font-bold mb-1">AI images</h2>
+        <p className="text-xs text-muted-foreground mb-4">
+          Powers <strong>Generate image</strong> in the media library and the AI background
+          replacement / retouching buttons in the image editor.
+        </p>
+        <div className="grid md:grid-cols-2 gap-4">
+          <label className="block">
+            <span className="text-xs font-semibold text-muted-foreground uppercase">Image provider</span>
+            <select
+              value={cfg.imageProvider}
+              onChange={(e) => {
+                const p = e.target.value as AiConfig["imageProvider"];
+                set({ imageProvider: p, imageModel: p === "openai" ? "gpt-image-1" : p === "gemini" ? "gemini-2.5-flash-image" : "" });
+              }}
+              className="mt-1 w-full border rounded-md px-3 py-2 text-sm bg-card"
+            >
+              <option value="none">Disabled</option>
+              <option value="gemini">Google Gemini</option>
+              <option value="openai">OpenAI</option>
+            </select>
+          </label>
+          {cfg.imageProvider !== "none" && (
+            <>
+              <label className="block">
+                <span className="text-xs font-semibold text-muted-foreground uppercase">Image model</span>
+                <input list="ai-image-models" value={cfg.imageModel} onChange={(e) => set({ imageModel: e.target.value })} className="mt-1 w-full border rounded-md px-3 py-2 text-sm" />
+                <datalist id="ai-image-models">
+                  {(cfg.imageProvider === "openai" ? ["gpt-image-1", "dall-e-3"] : ["gemini-2.5-flash-image", "gemini-2.0-flash-preview-image-generation"]).map((m) => <option key={m} value={m} />)}
+                </datalist>
+              </label>
+              <label className="block md:col-span-2">
+                <span className="text-xs font-semibold text-muted-foreground uppercase">Image API key</span>
+                <input type="password" value={cfg.imageApiKey} onChange={(e) => set({ imageApiKey: e.target.value })} placeholder={cfg.imageProvider === "openai" ? "sk-…" : "AIza…"} className="mt-1 w-full border rounded-md px-3 py-2 text-sm font-mono" />
+                <span className="block text-xs text-muted-foreground mt-1">
+                  {cfg.imageProvider === "openai"
+                    ? "From platform.openai.com → API keys. Supports generation and instruction-based editing."
+                    : "From aistudio.google.com → Get API key. Gemini also edits an existing image from a plain-English instruction."}
+                </span>
+              </label>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

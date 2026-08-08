@@ -107,3 +107,50 @@ export const aiAltText = createServerFn({ method: "POST" })
     });
     return { text: text.replace(/^["']|["']$/g, "").slice(0, 125) };
   });
+
+/* ---------- AI images (generation + editing) ---------- */
+
+// Is an image provider configured? Lets the editor hide AI buttons when not.
+export const aiImageStatus = createServerFn({ method: "GET" }).handler(async (): Promise<{ enabled: boolean; provider: string }> => {
+  const { requireStaff } = await import("@/server/auth/context");
+  await requireStaff();
+  try {
+    const { getAiConfig } = await import("@/server/site-config");
+    const c = await getAiConfig();
+    return { enabled: c.imageProvider !== "none" && !!c.imageApiKey, provider: c.imageProvider };
+  } catch {
+    return { enabled: false, provider: "none" };
+  }
+});
+
+// Text prompt -> image. Optionally saved straight into the media library.
+export const aiGenerateImage = createServerFn({ method: "POST" })
+  .inputValidator((i: unknown) => z.object({ prompt: z.string().trim().min(3).max(2000), save: z.boolean().default(true) }).parse(i))
+  .handler(async ({ data }): Promise<{ dataUrl: string; url?: string }> => {
+    const { requireStaff } = await import("@/server/auth/context");
+    const actor = await requireStaff();
+    const { generateImage } = await import("@/server/ai-image");
+    const img = await generateImage(data.prompt);
+    let url: string | undefined;
+    if (data.save) {
+      const { storeUpload } = await import("@/server/uploads");
+      const name = `ai-${data.prompt.toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 40) || "image"}.png`;
+      const saved = await storeUpload({ filename: name, dataUrl: img.dataUrl });
+      url = saved.url;
+    }
+    try { const { audit } = await import("@/server/audit"); await audit(actor, "ai.image.generate", "media", data.prompt.slice(0, 80)); } catch { /* ignore */ }
+    return { dataUrl: img.dataUrl, url };
+  });
+
+// Edit an existing image with an instruction — background removal, retouching,
+// scene replacement. Returns a data URL for the editor to load.
+export const aiEditImage = createServerFn({ method: "POST" })
+  .inputValidator((i: unknown) => z.object({ dataUrl: z.string().min(20).max(12_000_000), instruction: z.string().trim().min(3).max(1000) }).parse(i))
+  .handler(async ({ data }): Promise<{ dataUrl: string }> => {
+    const { requireStaff } = await import("@/server/auth/context");
+    const actor = await requireStaff();
+    const { editImage } = await import("@/server/ai-image");
+    const img = await editImage(data.dataUrl, data.instruction);
+    try { const { audit } = await import("@/server/audit"); await audit(actor, "ai.image.edit", "media", data.instruction.slice(0, 80)); } catch { /* ignore */ }
+    return { dataUrl: img.dataUrl };
+  });

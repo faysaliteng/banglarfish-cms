@@ -166,6 +166,11 @@ export type AiConfig = {
   baseUrl: string; // for openai-compatible / ollama endpoints
   tone: string; // brand tone-of-voice used in prompts
   maxTokens: number;
+  // Image generation / editing is a separate provider: the text model may be
+  // Claude (which has no image generation), so this is configured on its own.
+  imageProvider: "none" | "gemini" | "openai";
+  imageApiKey: string;
+  imageModel: string;
 };
 
 /* ---------------- Customer groups (B2B tiered pricing) ---------------- */

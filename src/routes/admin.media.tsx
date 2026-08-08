@@ -1,13 +1,13 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { Trash2, Upload, Image as ImageIcon, Copy, Wand2, RefreshCw, Zap } from "lucide-react";
+import { Trash2, Upload, Image as ImageIcon, Copy, Wand2, RefreshCw, Zap, Sparkles, X } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
 import { adminListMedia, adminDeleteMedia, adminSetMediaAlt, adminSyncMediaLibrary, adminOptimizerStats, adminOptimizeMedia } from "@/lib/admin-content.functions";
 import { ImageEditor } from "@/components/admin/ImageEditor";
 import { adminUploadMedia } from "@/lib/admin-upload.functions";
 import { AiButton } from "@/components/admin/AiButton";
-import { aiAltText } from "@/lib/ai.functions";
+import { aiAltText, aiImageStatus, aiGenerateImage } from "@/lib/ai.functions";
 
 export const Route = createFileRoute("/admin/media")({ component: MediaPage });
 
@@ -35,6 +35,13 @@ function MediaPage() {
   const [stats, setStats] = useState<{ total: number; optimized: number; pending: number; savedBytes: number; savedPercent: number } | null>(null);
   const [optimizing, setOptimizing] = useState(false);
   const [progress, setProgress] = useState("");
+
+  const imgStatusFn = useServerFn(aiImageStatus);
+  const genFn = useServerFn(aiGenerateImage);
+  const [aiOn, setAiOn] = useState(false);
+  const [genOpen, setGenOpen] = useState(false);
+  const [prompt, setPrompt] = useState("");
+  const [generating, setGenerating] = useState(false);
 
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -110,6 +117,21 @@ function MediaPage() {
     try { await setAltFn({ data: { id, alt } }); } catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
   }
 
+  useEffect(() => { imgStatusFn().then((r) => setAiOn(r.enabled)).catch(() => setAiOn(false)); }, [imgStatusFn]);
+
+  async function generate() {
+    if (prompt.trim().length < 3) return;
+    setGenerating(true);
+    try {
+      await genFn({ data: { prompt: prompt.trim(), save: true } });
+      toast.success("Image generated and added to the library");
+      setGenOpen(false); setPrompt("");
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Generation failed");
+    } finally { setGenerating(false); }
+  }
+
   const loadStats = useCallback(() => { statsFn().then(setStats).catch(() => {}); }, [statsFn]);
   useEffect(() => { loadStats(); }, [loadStats]);
 
@@ -178,6 +200,11 @@ function MediaPage() {
         <button onClick={optimizeAll} disabled={optimizing} className="inline-flex items-center gap-2 border px-4 py-2 rounded-md text-sm font-semibold hover:bg-muted disabled:opacity-60" title="Compress every image — same resolution, smaller files">
           <Zap className={`h-4 w-4 ${optimizing ? "animate-pulse" : ""}`} /> {optimizing ? "Compressing…" : "Compress images"}
         </button>
+        {aiOn && (
+          <button onClick={() => setGenOpen(true)} className="inline-flex items-center gap-2 border px-4 py-2 rounded-md text-sm font-semibold hover:bg-muted text-primary" title="Create a new image from a text description">
+            <Sparkles className="h-4 w-4" /> Generate image
+          </button>
+        )}
         <button onClick={onSync} disabled={syncing} className="inline-flex items-center gap-2 border px-4 py-2 rounded-md text-sm font-semibold hover:bg-muted disabled:opacity-60" title="Register images that already exist on the server (seeded artwork, previous uploads)">
           <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} /> {syncing ? "Importing…" : "Import existing"}
         </button>
@@ -239,6 +266,43 @@ function MediaPage() {
               </div>
             </div>
           ))}
+        </div>
+      )}
+      {genOpen && (
+        <div className="fixed inset-0 z-[60] bg-black/60 grid place-items-center p-4" onClick={() => !generating && setGenOpen(false)}>
+          <div className="bg-background rounded-2xl shadow-2xl w-full max-w-lg p-5" onClick={(e) => e.stopPropagation()}>
+            <div className="flex items-center gap-2 mb-3">
+              <Sparkles className="h-5 w-5 text-primary" />
+              <h3 className="font-bold">Generate an image</h3>
+              <button onClick={() => setGenOpen(false)} disabled={generating} className="ml-auto p-1.5 rounded-md hover:bg-muted disabled:opacity-50"><X className="h-4 w-4" /></button>
+            </div>
+            <textarea
+              value={prompt}
+              onChange={(e) => setPrompt(e.target.value)}
+              rows={3}
+              placeholder="A whole hilsa fish on crushed ice, top-down studio shot on a white background, soft daylight, high detail"
+              className="w-full border rounded-lg px-3 py-2 text-sm"
+            />
+            <div className="flex flex-wrap gap-1.5 mt-2">
+              {[
+                "Studio product shot on a seamless white background, soft shadows",
+                "Bengali kitchen scene, warm natural light, shallow depth of field",
+                "Wide banner for a seafood delivery promotion, teal and white",
+              ].map((t) => (
+                <button key={t} onClick={() => setPrompt(t)} className="text-[11px] px-2 py-1 rounded-md border hover:bg-muted">{t.split(",")[0]}</button>
+              ))}
+            </div>
+            <p className="text-[11px] text-muted-foreground mt-2">
+              The result is saved straight into the library, compressed like any other upload.
+              Describe the framing, background and lighting for the best result.
+            </p>
+            <div className="flex justify-end gap-2 mt-4">
+              <button onClick={() => setGenOpen(false)} disabled={generating} className="text-sm px-4 py-2 rounded-md border hover:bg-muted disabled:opacity-50">Cancel</button>
+              <button onClick={generate} disabled={generating || prompt.trim().length < 3} className="inline-flex items-center gap-2 bg-primary text-primary-foreground text-sm font-semibold px-5 py-2 rounded-md disabled:opacity-60">
+                <Sparkles className={`h-4 w-4 ${generating ? "animate-pulse" : ""}`} /> {generating ? "Generating…" : "Generate"}
+              </button>
+            </div>
+          </div>
         </div>
       )}
       {editing && (

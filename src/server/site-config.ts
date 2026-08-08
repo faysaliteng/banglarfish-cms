@@ -18,6 +18,9 @@ function aiDefaults(): AiConfig {
     model: process.env.AI_MODEL || "claude-sonnet-5",
     baseUrl: process.env.AI_BASE_URL || "",
     tone: "friendly, trustworthy, concise; Bangladeshi fish e-commerce brand",
+    imageProvider: (process.env.AI_IMAGE_PROVIDER as AiConfig["imageProvider"]) || "none",
+    imageApiKey: process.env.AI_IMAGE_API_KEY || process.env.GEMINI_API_KEY || "",
+    imageModel: process.env.AI_IMAGE_MODEL || "gemini-2.5-flash-image",
     maxTokens: 1024,
   };
 }
