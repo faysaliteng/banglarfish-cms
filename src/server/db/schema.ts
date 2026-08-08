@@ -404,6 +404,10 @@ export const media = pgTable("media", {
   hash: text("hash"), // sha256 of the original bytes (dedup)
   alt: text("alt").notNull().default(""), // accessibility / SEO alt text
   lqip: text("lqip").notNull().default(""), // tiny base64 blur placeholder
+  // Lossless-looking compression bookkeeping (same pixels, fewer bytes).
+  originalBytes: integer("original_bytes").notNull().default(0),
+  optimizedBytes: integer("optimized_bytes").notNull().default(0),
+  optimizedAt: timestamp("optimized_at", { withTimezone: true }),
   uploadedAt: timestamp("uploaded_at", { withTimezone: true }).notNull().defaultNow(),
 });
 

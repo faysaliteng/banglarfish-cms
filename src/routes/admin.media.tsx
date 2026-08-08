@@ -1,9 +1,9 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { Trash2, Upload, Image as ImageIcon, Copy, Wand2, RefreshCw } from "lucide-react";
+import { Trash2, Upload, Image as ImageIcon, Copy, Wand2, RefreshCw, Zap } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { adminListMedia, adminDeleteMedia, adminSetMediaAlt, adminSyncMediaLibrary } from "@/lib/admin-content.functions";
+import { adminListMedia, adminDeleteMedia, adminSetMediaAlt, adminSyncMediaLibrary, adminOptimizerStats, adminOptimizeMedia } from "@/lib/admin-content.functions";
 import { ImageEditor } from "@/components/admin/ImageEditor";
 import { adminUploadMedia } from "@/lib/admin-upload.functions";
 import { AiButton } from "@/components/admin/AiButton";
@@ -30,6 +30,11 @@ function MediaPage() {
   const syncFn = useServerFn(adminSyncMediaLibrary);
   const [editing, setEditing] = useState<MediaItem | null>(null);
   const [syncing, setSyncing] = useState(false);
+  const statsFn = useServerFn(adminOptimizerStats);
+  const optimizeFn = useServerFn(adminOptimizeMedia);
+  const [stats, setStats] = useState<{ total: number; optimized: number; pending: number; savedBytes: number; savedPercent: number } | null>(null);
+  const [optimizing, setOptimizing] = useState(false);
+  const [progress, setProgress] = useState("");
 
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -105,6 +110,30 @@ function MediaPage() {
     try { await setAltFn({ data: { id, alt } }); } catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
   }
 
+  const loadStats = useCallback(() => { statsFn().then(setStats).catch(() => {}); }, [statsFn]);
+  useEffect(() => { loadStats(); }, [loadStats]);
+
+  // Compress everything that hasn't been done yet, in small batches so the UI
+  // can report progress and no single request has to do all the work.
+  async function optimizeAll() {
+    setOptimizing(true);
+    let totalSaved = 0, totalDone = 0;
+    try {
+      for (let i = 0; i < 400; i++) {
+        const r = await optimizeFn({ data: { limit: 5, quality: 82, redo: false } });
+        totalSaved += r.saved;
+        totalDone += r.processed;
+        setProgress(`${totalDone} done · ${(totalSaved / 1048576).toFixed(2)} MB saved · ${r.remaining} left`);
+        if (r.remaining === 0 || r.processed === 0) break;
+      }
+      toast.success(totalDone ? `Compressed ${totalDone} image(s), saved ${(totalSaved / 1048576).toFixed(2)} MB` : "Everything is already compressed");
+      await load();
+      loadStats();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Compression failed");
+    } finally { setOptimizing(false); setProgress(""); }
+  }
+
   async function onSync() {
     setSyncing(true);
     try {
@@ -146,6 +175,9 @@ function MediaPage() {
           <p className="text-sm text-muted-foreground">{media.length} files</p>
         </div>
         <div className="flex items-center gap-2">
+        <button onClick={optimizeAll} disabled={optimizing} className="inline-flex items-center gap-2 border px-4 py-2 rounded-md text-sm font-semibold hover:bg-muted disabled:opacity-60" title="Compress every image — same resolution, smaller files">
+          <Zap className={`h-4 w-4 ${optimizing ? "animate-pulse" : ""}`} /> {optimizing ? "Compressing…" : "Compress images"}
+        </button>
         <button onClick={onSync} disabled={syncing} className="inline-flex items-center gap-2 border px-4 py-2 rounded-md text-sm font-semibold hover:bg-muted disabled:opacity-60" title="Register images that already exist on the server (seeded artwork, previous uploads)">
           <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} /> {syncing ? "Importing…" : "Import existing"}
         </button>
@@ -159,6 +191,16 @@ function MediaPage() {
         </div>
         <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={onUpload} />
       </div>
+      {stats && stats.total > 0 && (
+        <div className="mb-5 rounded-xl border bg-card p-4 flex flex-wrap items-center gap-x-8 gap-y-2 text-sm">
+          <div className="flex items-center gap-2 font-semibold"><Zap className="h-4 w-4 text-primary" /> Image compression</div>
+          <div><span className="text-muted-foreground">Compressed</span> <strong>{stats.optimized}/{stats.total}</strong></div>
+          {stats.pending > 0 && <div><span className="text-muted-foreground">Pending</span> <strong>{stats.pending}</strong></div>}
+          <div><span className="text-muted-foreground">Saved</span> <strong className="text-emerald-600">{(stats.savedBytes / 1048576).toFixed(2)} MB</strong>{stats.savedPercent > 0 && <span className="text-emerald-600"> ({stats.savedPercent}% smaller)</span>}</div>
+          {optimizing && progress && <div className="text-primary">{progress}</div>}
+          <p className="w-full text-xs text-muted-foreground">Resolution is never changed — only the file size. New uploads are compressed automatically; originals are kept in <code>uploads/_originals</code>.</p>
+        </div>
+      )}
       {loading ? (
         <div className="border-2 border-dashed rounded-xl p-16 text-center text-muted-foreground">
           Loading…

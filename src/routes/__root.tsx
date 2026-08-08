@@ -19,7 +19,7 @@ import { Toaster } from "../components/ui/sonner";
 import { CookieConsent } from "../components/site/CookieConsent";
 import { getTheme } from "@/lib/theme.functions";
 import { getSeo, getBranding, getCustomCodePublic, getI18nState } from "@/lib/site.functions";
-import { getSettings } from "@/lib/catalog.functions";
+import { getSettings, listCategories, getMenus, getSiteSections } from "@/lib/catalog.functions";
 import { setCurrency, setPricing } from "@/lib/cart";
 import { recordPageView } from "@/lib/analytics.functions";
 import { recordNotFound } from "@/lib/redirects.functions";
@@ -112,9 +112,16 @@ function iconUrl(src: string | undefined, w: number): string {
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   loader: async () => {
-    const [theme, seo, branding, customCode, settings, i18n] = await Promise.all([getTheme(), getSeo(), getBranding(), getCustomCodePublic(), getSettings(), getI18nState()]);
+    // Header/Footer/Logo used to fetch these themselves after hydration — five
+    // extra client round trips per page view, and the header rendered with no
+    // categories until they landed. They come from here now (same Promise.all,
+    // no extra latency) and are SSR-rendered.
+    const [theme, seo, branding, customCode, settings, i18n, categories, menus, sections] = await Promise.all([
+      getTheme(), getSeo(), getBranding(), getCustomCodePublic(), getSettings(), getI18nState(),
+      listCategories().catch(() => []), getMenus().catch(() => ({ header: [], footer: [] })), getSiteSections().catch(() => null),
+    ]);
     const siteUrl = (process.env.APP_URL || "").replace(/\/+$/, "");
-    return { theme, seo, branding, customCode, settings, siteUrl, i18n };
+    return { theme, seo, branding, customCode, settings, siteUrl, i18n, categories, menus, sections };
   },
   head: ({ loaderData }) => ({
     meta: [

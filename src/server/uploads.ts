@@ -69,8 +69,24 @@ export async function storeUpload(data: { filename: string; dataUrl: string }): 
     } catch { /* sharp unavailable / non-decodable */ }
   }
 
+  // Compress on the way in — same pixels, fewer bytes. Best-effort: a failure
+  // here must never lose the upload.
+  const originalBytes = buffer.length;
+  let finalBytes = originalBytes;
+  let optimizedAt: Date | null = null;
+  try {
+    const { optimizeImageFile } = await import("./image-optimizer");
+    const res = await optimizeImageFile(path.join(dir, finalName));
+    if (res.ok) { finalBytes = res.after || originalBytes; optimizedAt = new Date(); }
+  } catch (e) {
+    console.error("[upload] optimize failed", e instanceof Error ? e.message : e);
+  }
+
   const url = `/uploads/${finalName}`;
-  const sizeKb = `${Math.round(buffer.length / 1024)} KB`;
-  const [row] = await db.insert(media).values({ name: data.filename, url, size: sizeKb, width, height, hash, lqip }).returning({ id: media.id });
+  const sizeKb = `${Math.max(1, Math.round(finalBytes / 1024))} KB`;
+  const [row] = await db.insert(media).values({
+    name: data.filename, url, size: sizeKb, width, height, hash, lqip,
+    originalBytes, optimizedBytes: finalBytes, optimizedAt,
+  }).returning({ id: media.id });
   return { id: row.id, url, name: data.filename, size: sizeKb };
 }

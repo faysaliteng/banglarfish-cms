@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { adminGetTheme, adminSaveTheme } from "@/lib/theme.functions";
-import { THEME_PRESETS, PRESET_META, FONT_OPTIONS, defaultTheme } from "@/lib/theme-presets";
+import { THEME_PRESETS, PRESET_META, FONT_OPTIONS, defaultTheme, loadPresetGallery } from "@/lib/theme-presets";
 import type { Theme } from "@/lib/types";
 import { Save, Check, Palette, ShoppingBag, Star, Download, Upload, RotateCcw, Sparkles } from "lucide-react";
 import { toast } from "sonner";
@@ -36,7 +36,11 @@ function ThemePage() {
     getFn().then((t) => setTheme({ ...defaultTheme, ...t })).catch((e) => toast.error(e instanceof Error ? e.message : "Failed"));
   }, [getFn]);
 
-  const categories = useMemo(() => ["all", ...Array.from(new Set(PRESET_META.map((p) => p.category)))], []);
+  // The full preset gallery is admin-only, so it is code-split out of the
+  // storefront bundle and pulled in here on mount.
+  const [galleryReady, setGalleryReady] = useState(false);
+  useEffect(() => { loadPresetGallery().then(() => setGalleryReady(true)).catch(() => setGalleryReady(true)); }, []);
+  const categories = useMemo(() => ["all", ...Array.from(new Set(PRESET_META.map((p) => p.category)))], [galleryReady]);
 
   if (!theme) return <p className="text-sm text-muted-foreground">Loading…</p>;
 
@@ -73,6 +77,7 @@ function ThemePage() {
     }
   }
 
+  void galleryReady; // re-render once the gallery lands
   const shownPresets = PRESET_META.filter((p) => cat === "all" || p.category === cat);
 
   return (

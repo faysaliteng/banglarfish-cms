@@ -18,7 +18,7 @@ export const applyStarterTemplate = createServerFn({ method: "POST" })
     const { eq } = await import("drizzle-orm");
     const { audit } = await import("@/server/audit");
     const { STARTER_TEMPLATES } = await import("@/lib/starter-templates");
-    const { THEME_PRESETS, defaultTheme } = await import("@/lib/theme-presets");
+    const { THEME_PRESETS, defaultTheme } = await (async () => { const m = await import("@/lib/theme-presets"); await m.loadPresetGallery(); return m; })();
     const { defaultHomepage, defaultSettings } = await import("@/server/content-defaults");
 
     const actor = await requireManager();

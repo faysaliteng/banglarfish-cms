@@ -1,6 +1,5 @@
 // Client-safe theme presets + CSS generator (no server imports).
 import type { Theme, ThemeFont } from "./types";
-import { EXTRA_PRESETS } from "./theme-gallery";
 
 /* ------------------------------------------------------------------ *
  * Fonts — each maps to a CSS font stack. New fonts must also be added
@@ -122,10 +121,23 @@ export function registerPresets(extra: { key: string; label: string; desc: strin
   }
 }
 
-// Register the generated gallery (brings the library to 50+ presets).
-registerPresets(EXTRA_PRESETS);
+// The generated gallery (~66KB) is NOT registered here on purpose: a
+// module-scope side effect would pull it into the storefront bundle, where no
+// shopper can ever see it. Callers that need the full library register it
+// lazily — see loadPresetGallery() below.
 
 export const defaultTheme: Theme = THEME_PRESETS.classic;
+
+// Load + register the generated preset gallery on demand. Idempotent, so it is
+// safe to call from several places. Only the admin theme editor and the
+// starter/homepage template appliers need it.
+let galleryLoaded = false;
+export async function loadPresetGallery(): Promise<void> {
+  if (galleryLoaded) return;
+  galleryLoaded = true;
+  const { EXTRA_PRESETS } = await import("./theme-gallery");
+  registerPresets(EXTRA_PRESETS);
+}
 
 /* ------------------------------------------------------------------ *
  * CSS generator

@@ -1,12 +1,8 @@
-import { Link } from "@tanstack/react-router";
+import { Link, useLoaderData } from "@tanstack/react-router";
 import { Search, ShoppingBag, User, Menu, Phone, LogOut, LayoutDashboard, Globe, Mail } from "lucide-react";
 import { useState } from "react";
-import { useQuery } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
 import { Logo } from "./Logo";
 import { useCart } from "@/lib/cart";
-import { listCategories, getMenus, getSiteSections, getSettings } from "@/lib/catalog.functions";
-import { getBranding } from "@/lib/site.functions";
 import { useSession, useIsAdmin, useSignOut } from "@/lib/auth";
 import { withBase } from "@/lib/base-path";
 import { useI18n, setLang } from "@/lib/i18n";
@@ -28,21 +24,18 @@ export function Header() {
   const { isAdmin } = useIsAdmin(user);
   const signOut = useSignOut();
 
-  const catFn = useServerFn(listCategories);
-  const { data: categories = [] } = useQuery({ queryKey: ["categories"], queryFn: () => catFn(), staleTime: 300_000 });
-  const menusFn = useServerFn(getMenus);
-  const { data: menus } = useQuery({ queryKey: ["menus"], queryFn: () => menusFn(), staleTime: 300_000 });
-  const sectionsFn = useServerFn(getSiteSections);
-  const { data: sections } = useQuery({ queryKey: ["sections"], queryFn: () => sectionsFn(), staleTime: 300_000 });
+  // Chrome data comes from the root loader (SSR-rendered, zero client requests).
+  const root = useLoaderData({ from: "__root__" });
+  const categories = root?.categories ?? [];
+  const menus = root?.menus;
+  const sections = root?.sections;
   const showBlog = sections?.blog !== false;
   const showRecipes = sections?.recipes !== false;
   const showContact = sections?.contact !== false;
   // Drop any menu items that duplicate the built-in Blog / Recipes links.
   const headerLinks = (menus?.header ?? []).filter((l) => !/\/(blog|recipes)\/?$/i.test(l.href));
-  const brandingFn = useServerFn(getBranding);
-  const { data: branding } = useQuery({ queryKey: ["branding"], queryFn: () => brandingFn(), staleTime: 300_000 });
-  const settingsFn = useServerFn(getSettings);
-  const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: () => settingsFn(), staleTime: 300_000 });
+  const branding = root?.branding;
+  const settings = root?.settings;
   const phone = settings?.storePhone || "+880 9642-057407";
   const { t, enabled: i18nOn, languages, lang } = useI18n();
 

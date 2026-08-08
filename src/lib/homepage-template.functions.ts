@@ -15,7 +15,7 @@ export const applyHomepageTemplate = createServerFn({ method: "POST" })
     const { audit } = await import("@/server/audit");
     const { HOMEPAGE_TEMPLATES } = await import("@/lib/homepage-templates");
     const { defaultHomepage } = await import("@/server/content-defaults");
-    const { defaultTheme } = await import("@/lib/theme-presets");
+    const { defaultTheme } = await (async () => { const m = await import("@/lib/theme-presets"); await m.loadPresetGallery(); return m; })();
 
     const actor = await requireManager();
     const t = HOMEPAGE_TEMPLATES.find((x) => x.id === data.id);

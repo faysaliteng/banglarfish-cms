@@ -552,3 +552,78 @@ export const adminRestoreRevision = createServerFn({ method: "POST" })
     }
     return { ok: true, entityType: rev.entityType, entityId: rev.entityId };
   });
+
+/* ---------- Image compression (ShortPixel-style, self-hosted) ---------- */
+
+export type OptimizerStats = { total: number; optimized: number; pending: number; originalBytes: number; optimizedBytes: number; savedBytes: number; savedPercent: number };
+
+// How much have we saved, and how much is left to do?
+export const adminOptimizerStats = createServerFn({ method: "GET" }).handler(async (): Promise<OptimizerStats> => {
+  const { requireStaff } = await import("@/server/auth/context");
+  await requireStaff();
+  const { db } = await import("@/server/db");
+  const { media } = await import("@/server/db/schema");
+  const rows = await db.select().from(media);
+  let originalBytes = 0, optimizedBytes = 0, optimized = 0;
+  for (const m of rows) {
+    if (m.optimizedAt) {
+      optimized++;
+      originalBytes += m.originalBytes || 0;
+      optimizedBytes += m.optimizedBytes || 0;
+    }
+  }
+  const savedBytes = Math.max(0, originalBytes - optimizedBytes);
+  return {
+    total: rows.length,
+    optimized,
+    pending: rows.length - optimized,
+    originalBytes, optimizedBytes, savedBytes,
+    savedPercent: originalBytes > 0 ? Math.round((savedBytes / originalBytes) * 100) : 0,
+  };
+});
+
+// Compress a batch of not-yet-optimised images. Batched so the UI can show
+// progress and a huge library can't time out a single request.
+export const adminOptimizeMedia = createServerFn({ method: "POST" })
+  .inputValidator((i: unknown) => z.object({ limit: z.number().int().min(1).max(25).default(5), quality: z.number().int().min(50).max(95).default(82), redo: z.boolean().default(false) }).parse(i))
+  .handler(async ({ data }): Promise<{ processed: number; saved: number; remaining: number; items: { name: string; before: number; after: number; savedPercent: number; note?: string }[] }> => {
+    const { requireStaff } = await import("@/server/auth/context");
+    await requireStaff();
+    const { db } = await import("@/server/db");
+    const { media } = await import("@/server/db/schema");
+    const { isNull, eq, asc } = await import("drizzle-orm");
+    const { optimizeImageFile, resolveMediaPath } = await import("@/server/image-optimizer");
+    const { stat } = await import("node:fs/promises");
+
+    const rows = data.redo
+      ? await db.select().from(media).orderBy(asc(media.uploadedAt)).limit(data.limit)
+      : await db.select().from(media).where(isNull(media.optimizedAt)).orderBy(asc(media.uploadedAt)).limit(data.limit);
+
+    const items: { name: string; before: number; after: number; savedPercent: number; note?: string }[] = [];
+    let saved = 0, processed = 0;
+
+    for (const m of rows) {
+      const abs = resolveMediaPath(m.url);
+      if (!abs) {
+        // Mark it done so an unreachable file doesn't block the queue forever.
+        await db.update(media).set({ optimizedAt: new Date() }).where(eq(media.id, m.id));
+        items.push({ name: m.name, before: 0, after: 0, savedPercent: 0, note: "not a local file" });
+        continue;
+      }
+      const res = await optimizeImageFile(abs, { quality: data.quality });
+      processed++;
+      saved += res.saved;
+      const after = res.after || res.before;
+      await db.update(media).set({
+        originalBytes: m.originalBytes && data.redo ? m.originalBytes : res.before,
+        optimizedBytes: after,
+        optimizedAt: new Date(),
+        size: `${Math.max(1, Math.round(after / 1024))} KB`,
+      }).where(eq(media.id, m.id));
+      items.push({ name: m.name, before: res.before, after, savedPercent: res.savedPercent, note: res.skipped });
+      void stat;
+    }
+
+    const [{ n }] = await db.select({ n: (await import("drizzle-orm")).count() }).from(media).where(isNull(media.optimizedAt));
+    return { processed, saved, remaining: Number(n ?? 0), items };
+  });

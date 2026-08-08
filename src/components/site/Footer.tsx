@@ -1,17 +1,12 @@
-import { Link } from "@tanstack/react-router";
-import { useQuery } from "@tanstack/react-query";
-import { useServerFn } from "@tanstack/react-start";
+import { Link, useLoaderData } from "@tanstack/react-router";
 import { Logo } from "./Logo";
-import { getMenus, getSettings } from "@/lib/catalog.functions";
 import { Facebook, Instagram, Youtube, Mail, MapPin, Phone } from "lucide-react";
 import { useI18n } from "@/lib/i18n";
 
 export function Footer() {
-  const menusFn = useServerFn(getMenus);
-  const { data: menus } = useQuery({ queryKey: ["menus"], queryFn: () => menusFn(), staleTime: 300_000 });
-  const footerLinks = menus?.footer ?? [];
-  const settingsFn = useServerFn(getSettings);
-  const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: () => settingsFn(), staleTime: 300_000 });
+  const root = useLoaderData({ from: "__root__" });
+  const footerLinks = root?.menus?.footer ?? [];
+  const settings = root?.settings;
   const address = settings?.address || "House-349, Road-15, Block-K, South Banasree, Dhaka";
   const phone = settings?.storePhone || "+880 9642-057407";
   const email = settings?.storeEmail || "support@banglarfish.com";
