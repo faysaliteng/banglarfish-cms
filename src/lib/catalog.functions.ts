@@ -315,7 +315,19 @@ export const subscribeNewsletter = createServerFn({ method: "POST" })
 
     // Insert the subscriber; onConflictDoNothing returns no row if already subscribed.
     const inserted = await db.insert(newsletterSubscribers).values({ email }).onConflictDoNothing().returning({ id: newsletterSubscribers.id });
-    if (inserted.length === 0) return { ok: true, issued: false }; // already subscribed → no new coupon
+    if (inserted.length === 0) {
+      // Address already on file. If they had opted out and are signing up again,
+      // that is a fresh, deliberate opt-in — reactivate. Otherwise nothing to do,
+      // and no second joining coupon.
+      const [existing] = await db.select({ status: newsletterSubscribers.status })
+        .from(newsletterSubscribers).where(eq(newsletterSubscribers.email, email)).limit(1);
+      if (existing?.status === "unsubscribed") {
+        await db.update(newsletterSubscribers)
+          .set({ status: "active", unsubscribedAt: null })
+          .where(eq(newsletterSubscribers.email, email));
+      }
+      return { ok: true, issued: false };
+    }
 
     // Generate a unique single-use 10% welcome coupon.
     let code = "";
@@ -358,6 +370,10 @@ export const unsubscribeNewsletter = createServerFn({ method: "POST" })
     const email = data.email.toLowerCase();
     const expected = await unsubscribeToken(email);
     if (expected !== data.token) return { ok: false };
-    await db.delete(newsletterSubscribers).where(eq(newsletterSubscribers.email, email));
+    // Mark, never delete. Deleting loses the opt-out, so the next time this
+    // address is typed into the footer form we would start mailing them again.
+    await db.update(newsletterSubscribers)
+      .set({ status: "unsubscribed", unsubscribedAt: new Date() })
+      .where(eq(newsletterSubscribers.email, email));
     return { ok: true };
   });

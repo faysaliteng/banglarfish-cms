@@ -36,6 +36,13 @@
       "when": 1786176585875,
       "tag": "0004_image_compression",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "7",
+      "when": 1786176586875,
+      "tag": "0005_newsletter",
+      "breakpoints": true
     }
   ]
 }

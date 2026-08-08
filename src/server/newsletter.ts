@@ -21,7 +21,27 @@ export async function unsubscribeToken(email: string): Promise<string> {
 
 // Absolute unsubscribe URL to embed in marketing emails.
 export async function unsubscribeUrl(email: string): Promise<string> {
-  const base = (process.env.APP_URL || "").replace(/\/+$/, "");
+  const base = (process.env.APP_URL || "https://banglarfish.com").replace(/\/+$/, "");
   const t = await unsubscribeToken(email);
   return `${base}/unsubscribe?email=${encodeURIComponent(email)}&token=${t}`;
+}
+
+/**
+ * Preference-centre URL — same signed token, different page. Offering this
+ * alongside "unsubscribe" keeps people who only wanted fewer emails, rather
+ * than losing them entirely because leaving was the only button.
+ */
+export async function preferencesUrl(email: string): Promise<string> {
+  const base = (process.env.APP_URL || "https://banglarfish.com").replace(/\/+$/, "");
+  const t = await unsubscribeToken(email);
+  return `${base}/preferences?email=${encodeURIComponent(email)}&token=${t}`;
+}
+
+/** Constant-time-ish check that a link really was issued by us for this address. */
+export async function verifyToken(email: string, token: string): Promise<boolean> {
+  const expected = await unsubscribeToken(email);
+  if (expected.length !== (token || "").length) return false;
+  let diff = 0;
+  for (let i = 0; i < expected.length; i++) diff |= expected.charCodeAt(i) ^ token.charCodeAt(i);
+  return diff === 0;
 }

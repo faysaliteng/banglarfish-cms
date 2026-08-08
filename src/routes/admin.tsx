@@ -1,5 +1,5 @@
 import { createFileRoute, Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
-import { LayoutDashboard, Package, ShoppingCart, Users, Tag, FileText, Settings, Image as ImageIcon, MessageSquare, Ticket, Truck, BarChart3, Home, LogOut, Menu as MenuIcon, X, Newspaper, GalleryHorizontal, ListTree, Palette, Globe, CreditCard, Smartphone, Search, Sparkles, KeyRound, MapPin, ChefHat, Code, BookOpen, Blocks, LayoutTemplate, Rocket, RotateCcw, ArrowRightLeft, Mail, Receipt, Gift, LineChart, Languages, Cog, Plug, Webhook, Boxes, BadgePercent, ShieldCheck, Activity, Inbox } from "lucide-react";
+import { LayoutDashboard, Package, ShoppingCart, Users, Tag, FileText, Settings, Image as ImageIcon, MessageSquare, Ticket, Truck, BarChart3, Home, LogOut, Menu as MenuIcon, X, Newspaper, GalleryHorizontal, ListTree, Palette, Globe, CreditCard, Smartphone, Search, Sparkles, KeyRound, MapPin, ChefHat, Code, BookOpen, Blocks, LayoutTemplate, Rocket, RotateCcw, ArrowRightLeft, Mail, Receipt, Gift, LineChart, Languages, Cog, Plug, Webhook, Boxes, BadgePercent, ShieldCheck, Activity, Inbox, Megaphone } from "lucide-react";
 import { Logo } from "@/components/site/Logo";
 import { useSession, useIsAdmin, useSignOut } from "@/lib/auth";
 import { useEffect, useState } from "react";
@@ -34,7 +34,7 @@ const navGroups: { label: string; items: { to: string; label: string; icon: type
     items: [
       { to: "/admin/orders", label: "Orders", icon: ShoppingCart },
       { to: "/admin/coupons", label: "Coupons", icon: Ticket },
-      { to: "/admin/subscribers", label: "Newsletter Subscribers", icon: Mail },
+      { to: "/admin/newsletter", label: "Newsletter", icon: Megaphone },
       { to: "/admin/promotions", label: "Promotions", icon: BadgePercent },
       { to: "/admin/shipping", label: "Shipping", icon: Truck },
       { to: "/admin/tax", label: "Tax Engine", icon: Receipt },

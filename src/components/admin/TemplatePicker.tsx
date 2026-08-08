@@ -70,7 +70,7 @@ export default function TemplatePicker({
           </div>
         </div>
 
-        <div className="flex-1 min-h-0 grid sm:grid-cols-[220px_1fr_1fr]">
+        <div className="flex-1 min-h-0 grid sm:grid-cols-[210px_minmax(0,1fr)_minmax(0,1.15fr)]">
           {/* Categories */}
           <div className="hidden sm:block border-r overflow-y-auto py-2">
             <CatRow label="All templates" count={EMAIL_TEMPLATES.length} active={cat === "all"} onClick={() => setCat("all")} />

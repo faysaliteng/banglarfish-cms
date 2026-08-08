@@ -12,6 +12,8 @@ export type Mail = {
   attachments?: MailAttachment[];
   category?: string; // for the Sent log (welcome | passwordReset | orderConfirm | orderStatus | manual…)
   log?: boolean; // default true — record to the in-panel email client
+  /** Extra SMTP headers. Used for List-Unsubscribe on bulk sends. */
+  headers?: Record<string, string>;
 };
 
 function stripHtml(html: string): string {
@@ -214,6 +216,7 @@ async function sendViaSmtp(cfg: EmailConfig, mail: Mail): Promise<string> {
     html: mail.html,
     text: mail.text || stripHtml(mail.html),
     attachments: (mail.attachments ?? []).map((a) => ({ filename: a.filename, path: a.path, href: a.href, content: a.content })),
+    headers: mail.headers,
   });
   // Surface the assigned Message-ID so the Sent record can be threaded.
   return (info as { messageId?: string } | undefined)?.messageId ?? "";

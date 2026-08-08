@@ -19,6 +19,7 @@ import { Route as CheckoutRouteImport } from './routes/checkout'
 import { Route as CompleteProfileRouteImport } from './routes/complete-profile'
 import { Route as ContactRouteImport } from './routes/contact'
 import { Route as OrderConfirmedRouteImport } from './routes/order-confirmed'
+import { Route as PreferencesRouteImport } from './routes/preferences'
 import { Route as RecipesRouteImport } from './routes/recipes'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as ShopRouteImport } from './routes/shop'
@@ -53,6 +54,7 @@ import { Route as AdminMailRouteImport } from './routes/admin.mail'
 import { Route as AdminMediaRouteImport } from './routes/admin.media'
 import { Route as AdminMenusRouteImport } from './routes/admin.menus'
 import { Route as AdminModulesRouteImport } from './routes/admin.modules'
+import { Route as AdminNewsletterRouteImport } from './routes/admin.newsletter'
 import { Route as AdminOrdersRouteImport } from './routes/admin.orders'
 import { Route as AdminPagesRouteImport } from './routes/admin.pages'
 import { Route as AdminPaymentsRouteImport } from './routes/admin.payments'
@@ -137,6 +139,11 @@ const ContactRoute = ContactRouteImport.update({
 const OrderConfirmedRoute = OrderConfirmedRouteImport.update({
   id: '/order-confirmed',
   path: '/order-confirmed',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const PreferencesRoute = PreferencesRouteImport.update({
+  id: '/preferences',
+  path: '/preferences',
   getParentRoute: () => rootRouteImport,
 } as any)
 const RecipesRoute = RecipesRouteImport.update({
@@ -307,6 +314,11 @@ const AdminMenusRoute = AdminMenusRouteImport.update({
 const AdminModulesRoute = AdminModulesRouteImport.update({
   id: '/modules',
   path: '/modules',
+  getParentRoute: () => AdminRoute,
+} as any)
+const AdminNewsletterRoute = AdminNewsletterRouteImport.update({
+  id: '/newsletter',
+  path: '/newsletter',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminOrdersRoute = AdminOrdersRouteImport.update({
@@ -500,6 +512,7 @@ export interface FileRoutesByFullPath {
   '/complete-profile': typeof CompleteProfileRoute
   '/contact': typeof ContactRoute
   '/order-confirmed': typeof OrderConfirmedRoute
+  '/preferences': typeof PreferencesRoute
   '/recipes': typeof RecipesRoute
   '/reset-password': typeof ResetPasswordRoute
   '/shop': typeof ShopRoute
@@ -533,6 +546,7 @@ export interface FileRoutesByFullPath {
   '/admin/media': typeof AdminMediaRoute
   '/admin/menus': typeof AdminMenusRoute
   '/admin/modules': typeof AdminModulesRoute
+  '/admin/newsletter': typeof AdminNewsletterRoute
   '/admin/orders': typeof AdminOrdersRoute
   '/admin/pages': typeof AdminPagesRoute
   '/admin/payments': typeof AdminPaymentsRoute
@@ -579,6 +593,7 @@ export interface FileRoutesByTo {
   '/complete-profile': typeof CompleteProfileRoute
   '/contact': typeof ContactRoute
   '/order-confirmed': typeof OrderConfirmedRoute
+  '/preferences': typeof PreferencesRoute
   '/recipes': typeof RecipesRoute
   '/reset-password': typeof ResetPasswordRoute
   '/shop': typeof ShopRoute
@@ -612,6 +627,7 @@ export interface FileRoutesByTo {
   '/admin/media': typeof AdminMediaRoute
   '/admin/menus': typeof AdminMenusRoute
   '/admin/modules': typeof AdminModulesRoute
+  '/admin/newsletter': typeof AdminNewsletterRoute
   '/admin/orders': typeof AdminOrdersRoute
   '/admin/pages': typeof AdminPagesRoute
   '/admin/payments': typeof AdminPaymentsRoute
@@ -661,6 +677,7 @@ export interface FileRoutesById {
   '/complete-profile': typeof CompleteProfileRoute
   '/contact': typeof ContactRoute
   '/order-confirmed': typeof OrderConfirmedRoute
+  '/preferences': typeof PreferencesRoute
   '/recipes': typeof RecipesRoute
   '/reset-password': typeof ResetPasswordRoute
   '/shop': typeof ShopRoute
@@ -694,6 +711,7 @@ export interface FileRoutesById {
   '/admin/media': typeof AdminMediaRoute
   '/admin/menus': typeof AdminMenusRoute
   '/admin/modules': typeof AdminModulesRoute
+  '/admin/newsletter': typeof AdminNewsletterRoute
   '/admin/orders': typeof AdminOrdersRoute
   '/admin/pages': typeof AdminPagesRoute
   '/admin/payments': typeof AdminPaymentsRoute
@@ -744,6 +762,7 @@ export interface FileRouteTypes {
     | '/complete-profile'
     | '/contact'
     | '/order-confirmed'
+    | '/preferences'
     | '/recipes'
     | '/reset-password'
     | '/shop'
@@ -777,6 +796,7 @@ export interface FileRouteTypes {
     | '/admin/media'
     | '/admin/menus'
     | '/admin/modules'
+    | '/admin/newsletter'
     | '/admin/orders'
     | '/admin/pages'
     | '/admin/payments'
@@ -823,6 +843,7 @@ export interface FileRouteTypes {
     | '/complete-profile'
     | '/contact'
     | '/order-confirmed'
+    | '/preferences'
     | '/recipes'
     | '/reset-password'
     | '/shop'
@@ -856,6 +877,7 @@ export interface FileRouteTypes {
     | '/admin/media'
     | '/admin/menus'
     | '/admin/modules'
+    | '/admin/newsletter'
     | '/admin/orders'
     | '/admin/pages'
     | '/admin/payments'
@@ -904,6 +926,7 @@ export interface FileRouteTypes {
     | '/complete-profile'
     | '/contact'
     | '/order-confirmed'
+    | '/preferences'
     | '/recipes'
     | '/reset-password'
     | '/shop'
@@ -937,6 +960,7 @@ export interface FileRouteTypes {
     | '/admin/media'
     | '/admin/menus'
     | '/admin/modules'
+    | '/admin/newsletter'
     | '/admin/orders'
     | '/admin/pages'
     | '/admin/payments'
@@ -987,6 +1011,7 @@ export interface RootRouteChildren {
   CompleteProfileRoute: typeof CompleteProfileRoute
   ContactRoute: typeof ContactRoute
   OrderConfirmedRoute: typeof OrderConfirmedRoute
+  PreferencesRoute: typeof PreferencesRoute
   RecipesRoute: typeof RecipesRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   ShopRoute: typeof ShopRoute
@@ -1069,6 +1094,13 @@ declare module '@tanstack/react-router' {
       path: '/order-confirmed'
       fullPath: '/order-confirmed'
       preLoaderRoute: typeof OrderConfirmedRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/preferences': {
+      id: '/preferences'
+      path: '/preferences'
+      fullPath: '/preferences'
+      preLoaderRoute: typeof PreferencesRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/recipes': {
@@ -1307,6 +1339,13 @@ declare module '@tanstack/react-router' {
       path: '/modules'
       fullPath: '/admin/modules'
       preLoaderRoute: typeof AdminModulesRouteImport
+      parentRoute: typeof AdminRoute
+    }
+    '/admin/newsletter': {
+      id: '/admin/newsletter'
+      path: '/newsletter'
+      fullPath: '/admin/newsletter'
+      preLoaderRoute: typeof AdminNewsletterRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/orders': {
@@ -1604,6 +1643,7 @@ interface AdminRouteChildren {
   AdminMediaRoute: typeof AdminMediaRoute
   AdminMenusRoute: typeof AdminMenusRoute
   AdminModulesRoute: typeof AdminModulesRoute
+  AdminNewsletterRoute: typeof AdminNewsletterRoute
   AdminOrdersRoute: typeof AdminOrdersRoute
   AdminPagesRoute: typeof AdminPagesRoute
   AdminPaymentsRoute: typeof AdminPaymentsRoute
@@ -1662,6 +1702,7 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminMediaRoute: AdminMediaRoute,
   AdminMenusRoute: AdminMenusRoute,
   AdminModulesRoute: AdminModulesRoute,
+  AdminNewsletterRoute: AdminNewsletterRoute,
   AdminOrdersRoute: AdminOrdersRoute,
   AdminPagesRoute: AdminPagesRoute,
   AdminPaymentsRoute: AdminPaymentsRoute,
@@ -1728,6 +1769,7 @@ const rootRouteChildren: RootRouteChildren = {
   CompleteProfileRoute: CompleteProfileRoute,
   ContactRoute: ContactRoute,
   OrderConfirmedRoute: OrderConfirmedRoute,
+  PreferencesRoute: PreferencesRoute,
   RecipesRoute: RecipesRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   ShopRoute: ShopRoute,

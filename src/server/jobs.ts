@@ -98,6 +98,11 @@ function registerDefaults(): void {
     const { notifySearchEngines } = await import("./seo-ping");
     await notifySearchEngines(Array.isArray(p.paths) ? (p.paths as string[]) : []);
   });
+  registerJob("newsletter.send", async (p) => {
+    const { sendCampaign } = await import("./newsletter-send");
+    await sendCampaign(String(p.campaignId));
+  });
+
   registerJob("webhook.deliver", async (p) => {
     const { deliverWebhook } = await import("./webhooks");
     await deliverWebhook(String(p.endpointId), String(p.event), (p.data as Record<string, unknown>) ?? {});
@@ -130,6 +135,15 @@ function registerDefaults(): void {
       } catch { /* skip this one */ }
     }
     console.log(`[abandoned] reminded ${rows.length} cart(s)`);
+  });
+
+  // Newsletter automation. The interval only decides how often we LOOK; whether
+  // anything is actually sent is governed by DB watermarks inside runAnnouncements,
+  // because schedule() keeps its "last run" in memory and would otherwise re-fire
+  // — and re-send — on every process restart.
+  schedule("newsletter.scan", 15 * 60 * 1000, async () => {
+    const { runAnnouncements } = await import("./newsletter-send");
+    await runAnnouncements();
   });
 
   // Recurring maintenance (query-time gating already handles scheduled publish).

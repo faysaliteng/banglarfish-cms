@@ -448,16 +448,59 @@ export const wishlists = pgTable(
   (t) => [uniqueIndex("wishlist_uq").on(t.userId, t.productId)],
 );
 
+/**
+ * Newsletter topics a subscriber can opt into independently. Unsubscribing from
+ * "new recipes" should not also stop the weekly stock list.
+ */
+export type NewsletterTopics = {
+  products: boolean;   // new items in the shop
+  blog: boolean;       // new blog posts
+  recipes: boolean;    // new recipes
+  offers: boolean;     // price drops, coupons, promotions
+  digest: boolean;     // the weekly what's-available email
+};
+
 export const newsletterSubscribers = pgTable(
   "newsletter_subscribers",
   {
     id: uuid("id").primaryKey().defaultRandom(),
     email: text("email").notNull(),
+    name: text("name").notNull().default(""),
     couponCode: text("coupon_code").notNull().default(""),
+    /**
+     * "unsubscribed" rows are KEPT, not deleted. A deleted row would silently
+     * re-subscribe anyone who later typed their address into the footer form,
+     * which is exactly the behaviour that gets a sending domain blocklisted.
+     */
+    status: text("status").notNull().default("active"), // active | unsubscribed
+    topics: jsonb("topics").$type<NewsletterTopics>().notNull()
+      .default({ products: true, blog: true, recipes: true, offers: true, digest: true }),
+    source: text("source").notNull().default("site"),   // site | checkout | admin | import
+    lastSentAt: timestamp("last_sent_at", { withTimezone: true }),
+    unsubscribedAt: timestamp("unsubscribed_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("newsletter_email_uq").on(t.email)],
 );
+
+/** One row per broadcast — manual or automated — for history and re-sending. */
+export const newsletterCampaigns = pgTable("newsletter_campaigns", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  subject: text("subject").notNull().default(""),
+  html: text("html").notNull().default(""),
+  /** Which opt-in this went to; "all" ignores topic filtering (still honours status). */
+  topic: text("topic").notNull().default("all"),
+  /** manual = someone wrote it; the rest are automated senders. */
+  kind: text("kind").notNull().default("manual"), // manual | digest | announce
+  status: text("status").notNull().default("draft"), // draft | sending | sent | failed
+  audience: integer("audience").notNull().default(0),
+  sent: integer("sent").notNull().default(0),
+  failed: integer("failed").notNull().default(0),
+  lastError: text("last_error").notNull().default(""),
+  createdBy: uuid("created_by").references(() => users.id, { onDelete: "set null" }),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  sentAt: timestamp("sent_at", { withTimezone: true }),
+});
 
 export const auditLog = pgTable("audit_log", {
   id: uuid("id").primaryKey().defaultRandom(),
