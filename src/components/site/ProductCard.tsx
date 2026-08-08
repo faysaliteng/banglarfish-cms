@@ -1,10 +1,34 @@
-import { Link } from "@tanstack/react-router";
-import { ShoppingBag, Star } from "lucide-react";
+import { Link, useNavigate } from "@tanstack/react-router";
+import { ShoppingBag, Star, Heart } from "lucide-react";
+import { useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
+import { toggleWishlist } from "@/lib/account.functions";
+import { toast } from "sonner";
 import type { Product } from "@/lib/types";
 import { cart, formatBDT } from "@/lib/cart";
 import { Img } from "./Img";
 
 export function ProductCard({ product }: { product: Product }) {
+  const nav = useNavigate();
+  const wishFn = useServerFn(toggleWishlist);
+  const [wished, setWished] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  // Wishlist requires a signed-in user (the server fn calls requireUser), so
+  // bounce guests to sign-in and bring them back here.
+  async function onWish(e: React.MouseEvent) {
+    e.preventDefault(); e.stopPropagation();
+    setSaving(true);
+    try {
+      const r = await wishFn({ data: { productId: product.id } });
+      setWished(!!r.inWishlist);
+      toast.success(r.inWishlist ? "Saved to your wishlist" : "Removed from your wishlist");
+    } catch {
+      toast.message("Sign in to save items", { description: "Your wishlist is kept with your account." });
+      nav({ to: "/auth", search: { next: `/product/${product.slug}` } });
+    } finally { setSaving(false); }
+  }
+
   const discount = product.compareAt
     ? Math.round(((product.compareAt - product.price) / product.compareAt) * 100)
     : 0;
@@ -13,6 +37,15 @@ export function ProductCard({ product }: { product: Product }) {
     <div className="group relative flex flex-col rounded-xl border bg-card overflow-hidden hover:shadow-lg transition-shadow">
       <Link to="/product/$slug" params={{ slug: product.slug }} className="relative block aspect-square overflow-hidden bg-muted">
         <Img src={product.image} alt={product.name} width={400} height={400} sizes="(max-width: 768px) 50vw, 25vw" widths={[300, 600]} className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500" />
+        <button
+          onClick={onWish}
+          disabled={saving}
+          aria-label={wished ? "Remove from wishlist" : "Save to wishlist"}
+          title={wished ? "Remove from wishlist" : "Save to wishlist"}
+          className="absolute top-2 right-2 z-10 grid place-items-center h-8 w-8 rounded-full bg-white/90 shadow hover:bg-white transition disabled:opacity-60"
+        >
+          <Heart className={`h-4 w-4 ${wished ? "fill-[var(--color-brand)] text-[var(--color-brand)]" : "text-foreground/70"}`} />
+        </button>
         <div className="absolute top-2 left-2 flex flex-col gap-1">
           {discount > 0 && <span className="bg-[var(--color-brand)] text-white text-[11px] font-bold px-2 py-0.5 rounded">−{discount}%</span>}
           {product.isNew && <span className="bg-primary text-white text-[11px] font-bold px-2 py-0.5 rounded">NEW</span>}

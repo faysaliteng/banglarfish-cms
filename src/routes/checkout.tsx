@@ -6,6 +6,7 @@ import { useServerFn } from "@tanstack/react-start";
 import { me } from "@/lib/auth.functions";
 import { getProfile } from "@/lib/account.functions";
 import { createOrder } from "@/lib/orders.functions";
+import { getEnabledPaymentMethods } from "@/lib/site.functions";
 import { captureCheckout } from "@/lib/checkout.functions";
 import { withBase } from "@/lib/base-path";
 import { toast } from "sonner";
@@ -32,6 +33,8 @@ function Checkout() {
   const fetchProfile = useServerFn(getProfile);
   const submitOrder = useServerFn(createOrder);
   const capture = useServerFn(captureCheckout);
+  const payMethodsFn = useServerFn(getEnabledPaymentMethods);
+  const [pay, setPay] = useState<{ cod: boolean; bkash: boolean; nagad: boolean; card: boolean } | null>(null);
 
   // Save an in-progress checkout for abandoned-cart recovery (fires when contact entered).
   function captureNow(e: React.FocusEvent<HTMLInputElement>) {
@@ -45,6 +48,10 @@ function Checkout() {
       void capture({ data: { name: String(fd.get("full_name") ?? ""), phone, email, subtotal: totals.subtotal, items: lines.map((l) => ({ name: l.weight ? `${l.name} (${l.weight})` : l.name, qty: l.qty, price: l.price })) } });
     } catch { /* ignore */ }
   }
+
+  useEffect(() => {
+    payMethodsFn().then(setPay).catch(() => setPay({ cod: true, bkash: false, nagad: false, card: false }));
+  }, [payMethodsFn]);
 
   useEffect(() => {
     fetchMe().then(async (user) => {
@@ -132,10 +139,18 @@ function Checkout() {
               <textarea name="notes" placeholder="Delivery notes (optional)" rows={2} className="w-full border rounded-md px-3 py-2 text-sm" />
             </Section>
             <Section title="Payment">
-              <PayOption value="cod" defaultChecked title="Cash on Delivery" desc="Pay when your order arrives" />
-              <PayOption value="bkash" title="bKash" desc="Mobile financial service" />
-              <PayOption value="nagad" title="Nagad" desc="Mobile financial service" />
-              <PayOption value="card" title="Card (Visa / Mastercard)" desc="Secured via SSLCommerz" />
+              {/* Only methods the merchant enabled in Admin -> Payment Gateways. */}
+              {(() => {
+                const m = pay ?? { cod: true, bkash: false, nagad: false, card: false };
+                const opts = [
+                  m.cod && { v: "cod", t: "Cash on Delivery", d: "Pay when your order arrives" },
+                  m.bkash && { v: "bkash", t: "bKash", d: "Mobile financial service" },
+                  m.nagad && { v: "nagad", t: "Nagad", d: "Mobile financial service" },
+                  m.card && { v: "card", t: "Card (Visa / Mastercard)", d: "Secured via SSLCommerz" },
+                ].filter(Boolean) as { v: string; t: string; d: string }[];
+                if (!opts.length) return <p className="text-sm text-muted-foreground">No payment method is available right now. Please contact us to place your order.</p>;
+                return opts.map((o, i) => <PayOption key={o.v} value={o.v} defaultChecked={i === 0} title={o.t} desc={o.d} />);
+              })()}
             </Section>
           </div>
           <aside className="border rounded-xl p-6 h-fit bg-muted/30">

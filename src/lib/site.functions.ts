@@ -474,3 +474,23 @@ export const adminSaveCustomerGroups = createServerFn({ method: "POST" })
     await audit(actor, "customerGroups.config", "settings", "customerGroups");
     return { ok: true };
   });
+
+/* ---------------- Payment methods available to shoppers ---------------- */
+// Public: which payment methods checkout should offer. Nagad has no real
+// gateway implementation yet, so it is only offered in simulate mode — a live
+// store must never send a buyer to the mock payment page.
+export const getEnabledPaymentMethods = createServerFn({ method: "GET" }).handler(async (): Promise<{ cod: boolean; bkash: boolean; nagad: boolean; card: boolean }> => {
+  try {
+    const { getPaymentConfig } = await import("@/server/site-config");
+    const c = await getPaymentConfig();
+    const simulate = c.mode === "simulate";
+    return {
+      cod: !!c.cod.enabled,
+      bkash: !!c.bkash.enabled,
+      nagad: !!c.nagad.enabled && simulate,
+      card: !!c.sslcommerz.enabled,
+    };
+  } catch {
+    return { cod: true, bkash: false, nagad: false, card: false };
+  }
+});

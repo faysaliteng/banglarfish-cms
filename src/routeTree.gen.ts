@@ -40,7 +40,6 @@ import { Route as AdminCouponsRouteImport } from './routes/admin.coupons'
 import { Route as AdminCustomerGroupsRouteImport } from './routes/admin.customer-groups'
 import { Route as AdminCustomersRouteImport } from './routes/admin.customers'
 import { Route as AdminDeliveryRouteImport } from './routes/admin.delivery'
-import { Route as AdminDigitalRouteImport } from './routes/admin.digital'
 import { Route as AdminDocsRouteImport } from './routes/admin.docs'
 import { Route as AdminEmailRouteImport } from './routes/admin.email'
 import { Route as AdminGiftcardsRouteImport } from './routes/admin.giftcards'
@@ -243,11 +242,6 @@ const AdminCustomersRoute = AdminCustomersRouteImport.update({
 const AdminDeliveryRoute = AdminDeliveryRouteImport.update({
   id: '/delivery',
   path: '/delivery',
-  getParentRoute: () => AdminRoute,
-} as any)
-const AdminDigitalRoute = AdminDigitalRouteImport.update({
-  id: '/digital',
-  path: '/digital',
   getParentRoute: () => AdminRoute,
 } as any)
 const AdminDocsRoute = AdminDocsRouteImport.update({
@@ -526,7 +520,6 @@ export interface FileRoutesByFullPath {
   '/admin/customer-groups': typeof AdminCustomerGroupsRoute
   '/admin/customers': typeof AdminCustomersRoute
   '/admin/delivery': typeof AdminDeliveryRoute
-  '/admin/digital': typeof AdminDigitalRoute
   '/admin/docs': typeof AdminDocsRoute
   '/admin/email': typeof AdminEmailRoute
   '/admin/giftcards': typeof AdminGiftcardsRoute
@@ -606,7 +599,6 @@ export interface FileRoutesByTo {
   '/admin/customer-groups': typeof AdminCustomerGroupsRoute
   '/admin/customers': typeof AdminCustomersRoute
   '/admin/delivery': typeof AdminDeliveryRoute
-  '/admin/digital': typeof AdminDigitalRoute
   '/admin/docs': typeof AdminDocsRoute
   '/admin/email': typeof AdminEmailRoute
   '/admin/giftcards': typeof AdminGiftcardsRoute
@@ -689,7 +681,6 @@ export interface FileRoutesById {
   '/admin/customer-groups': typeof AdminCustomerGroupsRoute
   '/admin/customers': typeof AdminCustomersRoute
   '/admin/delivery': typeof AdminDeliveryRoute
-  '/admin/digital': typeof AdminDigitalRoute
   '/admin/docs': typeof AdminDocsRoute
   '/admin/email': typeof AdminEmailRoute
   '/admin/giftcards': typeof AdminGiftcardsRoute
@@ -773,7 +764,6 @@ export interface FileRouteTypes {
     | '/admin/customer-groups'
     | '/admin/customers'
     | '/admin/delivery'
-    | '/admin/digital'
     | '/admin/docs'
     | '/admin/email'
     | '/admin/giftcards'
@@ -853,7 +843,6 @@ export interface FileRouteTypes {
     | '/admin/customer-groups'
     | '/admin/customers'
     | '/admin/delivery'
-    | '/admin/digital'
     | '/admin/docs'
     | '/admin/email'
     | '/admin/giftcards'
@@ -935,7 +924,6 @@ export interface FileRouteTypes {
     | '/admin/customer-groups'
     | '/admin/customers'
     | '/admin/delivery'
-    | '/admin/digital'
     | '/admin/docs'
     | '/admin/email'
     | '/admin/giftcards'
@@ -1228,13 +1216,6 @@ declare module '@tanstack/react-router' {
       path: '/delivery'
       fullPath: '/admin/delivery'
       preLoaderRoute: typeof AdminDeliveryRouteImport
-      parentRoute: typeof AdminRoute
-    }
-    '/admin/digital': {
-      id: '/admin/digital'
-      path: '/digital'
-      fullPath: '/admin/digital'
-      preLoaderRoute: typeof AdminDigitalRouteImport
       parentRoute: typeof AdminRoute
     }
     '/admin/docs': {
@@ -1610,7 +1591,6 @@ interface AdminRouteChildren {
   AdminCustomerGroupsRoute: typeof AdminCustomerGroupsRoute
   AdminCustomersRoute: typeof AdminCustomersRoute
   AdminDeliveryRoute: typeof AdminDeliveryRoute
-  AdminDigitalRoute: typeof AdminDigitalRoute
   AdminDocsRoute: typeof AdminDocsRoute
   AdminEmailRoute: typeof AdminEmailRoute
   AdminGiftcardsRoute: typeof AdminGiftcardsRoute
@@ -1669,7 +1649,6 @@ const AdminRouteChildren: AdminRouteChildren = {
   AdminCustomerGroupsRoute: AdminCustomerGroupsRoute,
   AdminCustomersRoute: AdminCustomersRoute,
   AdminDeliveryRoute: AdminDeliveryRoute,
-  AdminDigitalRoute: AdminDigitalRoute,
   AdminDocsRoute: AdminDocsRoute,
   AdminEmailRoute: AdminEmailRoute,
   AdminGiftcardsRoute: AdminGiftcardsRoute,

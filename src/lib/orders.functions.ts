@@ -193,6 +193,22 @@ export const createOrder = createServerFn({ method: "POST" })
     const addTax = !(taxCfg.enabled && taxCfg.pricesIncludeTax);
     const total = Math.max(0, afterDiscount + shipping + (addTax ? tax : 0));
 
+    // Reject a payment method the merchant has disabled (the form can be tampered
+    // with, so the client-side filtering in checkout.tsx is not authoritative).
+    {
+      const { getPaymentConfig } = await import("@/server/site-config");
+      const pc = await getPaymentConfig().catch(() => null);
+      if (pc) {
+        const allowed: Record<string, boolean> = {
+          cod: !!pc.cod.enabled,
+          bkash: !!pc.bkash.enabled,
+          nagad: !!pc.nagad.enabled && pc.mode === "simulate", // no real Nagad gateway yet
+          card: !!pc.sslcommerz.enabled,
+        };
+        if (!allowed[data.payment_method]) throw new Error("That payment method is not available. Please choose another.");
+      }
+    }
+
     // Gift card — validate now; the balance is atomically decremented inside the transaction.
     let giftCardCode: string | null = null;
     let giftCardAmount = 0;

@@ -161,7 +161,57 @@ export async function handleApi(request: Request): Promise<Response | null> {
   if (path.startsWith("/api/payment/")) return paymentCallback(request, path);
   if (path.startsWith("/api/auth/")) return oauthRoute(request, path);
   if (path.startsWith("/api/invoice/") && path.endsWith(".pdf")) return invoicePdfRoute(request, path);
+  if (path.startsWith("/uploads/")) return uploadedFileRoute(path);
   return null;
+}
+
+// Serve user-uploaded files from UPLOAD_DIR.
+//
+// In production UPLOAD_DIR lives OUTSIDE the build output (so uploads survive a
+// redeploy), which means Nitro's static handler knows nothing about it — every
+// uploaded image 404s unless we serve it here.
+const UPLOAD_MIME: Record<string, string> = {
+  jpg: "image/jpeg", jpeg: "image/jpeg", png: "image/png", webp: "image/webp",
+  gif: "image/gif", avif: "image/avif", svg: "image/svg+xml", pdf: "application/pdf",
+};
+
+async function uploadedFileRoute(path: string): Promise<Response | null> {
+  const nodePath = await import("node:path");
+  const { readFile, stat } = await import("node:fs/promises");
+
+  const rel = decodeURIComponent(path.slice("/uploads/".length));
+  // Only ever serve a single flat filename — no traversal, no sub-paths.
+  const name = nodePath.basename(rel);
+  if (!name || name !== rel || name.startsWith(".")) return new Response("Not found", { status: 404 });
+
+  const ext = name.split(".").pop()?.toLowerCase() ?? "";
+  const mime = UPLOAD_MIME[ext];
+  if (!mime) return new Response("Not found", { status: 404 });
+
+  const dir = process.env.UPLOAD_DIR ?? nodePath.join(process.cwd(), "public", "uploads");
+  const file = nodePath.join(dir, name);
+  // Belt and braces: the resolved path must still sit inside the upload dir.
+  if (!nodePath.resolve(file).startsWith(nodePath.resolve(dir))) return new Response("Not found", { status: 404 });
+
+  try {
+    const st = await stat(file);
+    if (!st.isFile()) return new Response("Not found", { status: 404 });
+    const buf = await readFile(file);
+    return new Response(new Uint8Array(buf), {
+      status: 200,
+      headers: {
+        "content-type": mime,
+        "content-length": String(st.size),
+        // Uploaded names are content-hashed, so they can be cached hard.
+        "cache-control": "public, max-age=31536000, immutable",
+        "x-content-type-options": "nosniff",
+        // SVGs can carry script; never let one execute on our origin.
+        ...(ext === "svg" ? { "content-security-policy": "default-src 'none'; style-src 'unsafe-inline'; sandbox" } : {}),
+      },
+    });
+  } catch {
+    return new Response("Not found", { status: 404 });
+  }
 }
 
 // Streams a real PDF invoice. Auth: owner of the order, or any staff member.

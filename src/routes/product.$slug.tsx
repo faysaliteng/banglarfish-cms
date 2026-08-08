@@ -4,6 +4,9 @@ import { ProductCard } from "@/components/site/ProductCard";
 import { getProductBySlug } from "@/lib/catalog.functions";
 import { cart, formatBDT, getCurrency } from "@/lib/cart";
 import { useState } from "react";
+import { useServerFn } from "@tanstack/react-start";
+import { submitReview } from "@/lib/catalog.functions";
+import { toast } from "sonner";
 import { Star, ShoppingBag, Truck, ShieldCheck, Snowflake, Minus, Plus } from "lucide-react";
 import type { Variant } from "@/lib/types";
 import { sanitizeHtml } from "@/lib/sanitize-html";
@@ -172,10 +175,12 @@ function ProductPage() {
             </ul>
           )}
           {tab === "reviews" && (
-            reviews.length === 0 ? (
-              <p>No reviews yet. Be the first to review this product from your account.</p>
+            <>
+            <ReviewForm productId={product.id} />
+            {reviews.length === 0 ? (
+              <p>No reviews yet — be the first to review this product.</p>
             ) : (
-              <ul className="space-y-4">
+              <ul className="space-y-4 mt-6">
                 {reviews.map((r) => (
                   <li key={r.id} className="border rounded-lg p-4">
                     <div className="flex items-center gap-2">
@@ -189,7 +194,8 @@ function ProductPage() {
                   </li>
                 ))}
               </ul>
-            )
+            )}
+            </>
           )}
         </div>
       </div>
@@ -243,5 +249,57 @@ function Perk({ icon, label }: { icon: React.ReactNode; label: string }) {
       <div className="text-primary">{icon}</div>
       <span className="font-medium text-foreground">{label}</span>
     </div>
+  );
+}
+
+
+// Customer review form. submitReview is guarded by requireUser server-side, so a
+// signed-out visitor is told to sign in rather than silently failing.
+function ReviewForm({ productId }: { productId: string }) {
+  const send = useServerFn(submitReview);
+  const [rating, setRating] = useState(5);
+  const [title, setTitle] = useState("");
+  const [body, setBody] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  if (done) {
+    return (
+      <div className="rounded-xl border border-emerald-200 bg-emerald-50 text-emerald-800 p-4 text-sm">
+        Thanks for your review! It will appear here once it has been approved.
+      </div>
+    );
+  }
+
+  async function onSubmit(e: React.FormEvent) {
+    e.preventDefault();
+    setBusy(true);
+    try {
+      await send({ data: { productId, rating, title: title.trim(), body: body.trim() } });
+      setDone(true);
+      toast.success("Review submitted for approval");
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : "Could not submit your review";
+      toast.error(/sign in|unauthor/i.test(msg) ? "Please sign in to write a review" : msg);
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <form onSubmit={onSubmit} className="rounded-xl border p-4 bg-card">
+      <p className="font-semibold text-foreground mb-3">Write a review</p>
+      <div className="flex items-center gap-1 mb-3">
+        {Array.from({ length: 5 }).map((_, i) => (
+          <button key={i} type="button" onClick={() => setRating(i + 1)} aria-label={`${i + 1} star${i ? "s" : ""}`} className="p-0.5">
+            <Star className={`h-6 w-6 ${i < rating ? "fill-yellow-400 text-yellow-400" : "text-muted-foreground"}`} />
+          </button>
+        ))}
+        <span className="ml-2 text-xs text-muted-foreground">{rating} / 5</span>
+      </div>
+      <input value={title} onChange={(e) => setTitle(e.target.value)} required minLength={2} maxLength={120} placeholder="Sum it up in a few words" className="w-full border rounded-md px-3 py-2 text-sm mb-2" />
+      <textarea value={body} onChange={(e) => setBody(e.target.value)} required minLength={2} maxLength={2000} rows={4} placeholder="What did you think of it?" className="w-full border rounded-md px-3 py-2 text-sm" />
+      <button disabled={busy} className="mt-3 bg-primary text-primary-foreground px-5 py-2 rounded-md text-sm font-semibold disabled:opacity-60">
+        {busy ? "Submitting…" : "Submit review"}
+      </button>
+    </form>
   );
 }

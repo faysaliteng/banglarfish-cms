@@ -25,9 +25,9 @@ export function Footer() {
             Bangladesh's freshest fish, delivered from river and sea to your kitchen. Cleaned, iced, and dispatched within hours.
           </p>
           <div className="flex gap-3 mt-5">
-            <a aria-label="Facebook" href="#" className="p-2 rounded-full bg-white/10 hover:bg-primary transition"><Facebook className="h-4 w-4" /></a>
-            <a aria-label="Instagram" href="#" className="p-2 rounded-full bg-white/10 hover:bg-primary transition"><Instagram className="h-4 w-4" /></a>
-            <a aria-label="YouTube" href="#" className="p-2 rounded-full bg-white/10 hover:bg-primary transition"><Youtube className="h-4 w-4" /></a>
+            {settings?.facebook && <a aria-label="Facebook" href={settings.facebook} target="_blank" rel="noopener noreferrer" className="p-2 rounded-full bg-white/10 hover:bg-primary transition"><Facebook className="h-4 w-4" /></a>}
+            {settings?.instagram && <a aria-label="Instagram" href={settings.instagram} target="_blank" rel="noopener noreferrer" className="p-2 rounded-full bg-white/10 hover:bg-primary transition"><Instagram className="h-4 w-4" /></a>}
+            {settings?.youtube && <a aria-label="YouTube" href={settings.youtube} target="_blank" rel="noopener noreferrer" className="p-2 rounded-full bg-white/10 hover:bg-primary transition"><Youtube className="h-4 w-4" /></a>}
           </div>
         </div>
         <div>

@@ -95,7 +95,10 @@ function SettingsPage() {
         </Card>
 
         <Card title="Announcement Bar">
-          <Field label="Text shown in the top bar" value={s.announcement} onChange={(v) => set("announcement", v)} />
+          <p className="text-sm text-muted-foreground">
+            The announcement bar text is part of your branding, so it is edited there and applies immediately.
+          </p>
+          <a href="/admin/branding" className="inline-block mt-2 text-sm font-semibold text-primary hover:underline">Open Branding →</a>
         </Card>
 
         <Card title="Delivery">
@@ -105,10 +108,10 @@ function SettingsPage() {
         </Card>
 
         <Card title="Payment Gateways">
-          <Toggle label="Cash on Delivery" checked={s.cod} onChange={(v) => set("cod", v)} />
-          <Toggle label="bKash" checked={s.bkash} onChange={(v) => set("bkash", v)} />
-          <Toggle label="Nagad" checked={s.nagad} onChange={(v) => set("nagad", v)} />
-          <Toggle label="SSLCommerz (Cards)" checked={s.sslcommerz} onChange={(v) => set("sslcommerz", v)} />
+          <p className="text-sm text-muted-foreground">
+            Payment methods, credentials and live/sandbox mode are managed on their own page so there is a single source of truth.
+          </p>
+          <a href="/admin/payments" className="inline-block mt-2 text-sm font-semibold text-primary hover:underline">Open Payment Gateways →</a>
         </Card>
 
         <Card title="Social Links">
@@ -118,8 +121,10 @@ function SettingsPage() {
         </Card>
 
         <Card title="SEO Defaults">
-          <Field label="Meta title" value={s.metaTitle} onChange={(v) => set("metaTitle", v)} />
-          <Field label="Meta description" value={s.metaDescription} onChange={(v) => set("metaDescription", v)} />
+          <p className="text-sm text-muted-foreground">
+            Site title templates, meta defaults, social cards and verification codes live in the SEO engine.
+          </p>
+          <a href="/admin/seo" className="inline-block mt-2 text-sm font-semibold text-primary hover:underline">Open SEO Engine →</a>
         </Card>
       </div>
     </form>

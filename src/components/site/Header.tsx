@@ -1,5 +1,5 @@
 import { Link } from "@tanstack/react-router";
-import { Search, ShoppingBag, User, Menu, Phone, LogOut, LayoutDashboard, Globe } from "lucide-react";
+import { Search, ShoppingBag, User, Menu, Phone, LogOut, LayoutDashboard, Globe, Mail } from "lucide-react";
 import { useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
@@ -51,9 +51,16 @@ export function Header() {
       <div className="bg-primary text-primary-foreground text-xs">
         <div className="container-x flex items-center justify-between py-2">
           <span className="hidden sm:block">{branding?.announcement ?? "Free delivery on orders over ৳2,000 · Same-day delivery in Dhaka"}</span>
-          <a href={`tel:${phone.replace(/[^+\d]/g, "")}`} className="flex items-center gap-1.5 font-medium">
-            <Phone className="h-3.5 w-3.5" /> {phone}
-          </a>
+          <div className="flex items-center gap-4">
+            {showContact && (
+              <Link to="/contact" className="hidden sm:flex items-center gap-1.5 font-medium hover:underline">
+                <Mail className="h-3.5 w-3.5" /> {t("nav.contact")}
+              </Link>
+            )}
+            <a href={`tel:${phone.replace(/[^+\d]/g, "")}`} className="flex items-center gap-1.5 font-medium">
+              <Phone className="h-3.5 w-3.5" /> {phone}
+            </a>
+          </div>
         </div>
       </div>
       <div className="container-x flex items-center gap-3 md:gap-6 py-4">
