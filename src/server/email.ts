@@ -8,6 +8,7 @@ export type MailAttachment = { filename: string; path?: string; href?: string; c
 export type Mail = {
   to: string; subject: string; html: string; text?: string;
   cc?: string; bcc?: string; replyTo?: string;
+  inReplyTo?: string; // Message-ID being replied to (threads the conversation)
   attachments?: MailAttachment[];
   category?: string; // for the Sent log (welcome | passwordReset | orderConfirm | orderStatus | manual…)
   log?: boolean; // default true — record to the in-panel email client
@@ -154,7 +155,7 @@ export async function orderStatusTemplate(orderNumber: string, status: string): 
 }
 
 // Welcome-discount email sent when someone joins the newsletter.
-export async function couponEmail(code: string, percent = 10): Promise<Mail> {
+export async function couponEmail(code: string, percent = 10, unsubUrl = ""): Promise<Mail> {
   const b = await brand();
   const shopUrl = b.url ? `${b.url}/shop` : "#";
   const body = `<p style="line-height:1.7;margin:0 0 14px">Thanks for subscribing! Here's your <strong>${percent}% welcome discount</strong> — it's good for a single order.</p>
@@ -165,12 +166,13 @@ export async function couponEmail(code: string, percent = 10): Promise<Mail> {
   </div>
 </div>
 <p style="line-height:1.7;margin:0 0 14px">Enter it in the <strong>Coupon code</strong> box at checkout. One-time use.</p>
-<p style="margin:0"><a href="${shopUrl}" style="display:inline-block;background:${b.primary};color:#fff;text-decoration:none;font-weight:600;padding:11px 22px;border-radius:9px">Start shopping</a></p>`;
+<p style="margin:0"><a href="${shopUrl}" style="display:inline-block;background:${b.primary};color:#fff;text-decoration:none;font-weight:600;padding:11px 22px;border-radius:9px">Start shopping</a></p>
+${unsubUrl ? `<p style="margin:22px 0 0;color:#9ca3af;font-size:12px">Don't want these emails? <a href="${unsubUrl}" style="color:#9ca3af">Unsubscribe</a>.</p>` : ""}`;
   return { to: "", subject: `Your ${percent}% welcome discount 🎉`, html: layout(b, body), category: "newsletter" };
 }
 
 /* ---------------- Transport ---------------- */
-async function sendViaSmtp(cfg: EmailConfig, mail: Mail): Promise<void> {
+async function sendViaSmtp(cfg: EmailConfig, mail: Mail): Promise<string> {
   const nodemailer = (await import("nodemailer")).default;
   // A loopback SMTP host (self-hosted Postfix on 127.0.0.1) presents a
   // self-signed TLS cert. The connection never leaves the machine, so skip
@@ -184,8 +186,10 @@ async function sendViaSmtp(cfg: EmailConfig, mail: Mail): Promise<void> {
     auth: cfg.smtpUser ? { user: cfg.smtpUser, pass: cfg.smtpPass } : undefined,
     ...(isLoopback ? { ignoreTLS: true, tls: { rejectUnauthorized: false } } : {}),
   });
-  await transport.sendMail({
+  const info = await transport.sendMail({
     from: `"${cfg.fromName}" <${cfg.fromEmail}>`,
+    inReplyTo: mail.inReplyTo || undefined,
+    references: mail.inReplyTo || undefined,
     to: mail.to,
     cc: mail.cc || undefined,
     bcc: mail.bcc || undefined,
@@ -195,6 +199,8 @@ async function sendViaSmtp(cfg: EmailConfig, mail: Mail): Promise<void> {
     text: mail.text || stripHtml(mail.html),
     attachments: (mail.attachments ?? []).map((a) => ({ filename: a.filename, path: a.path, href: a.href, content: a.content })),
   });
+  // Surface the assigned Message-ID so the Sent record can be threaded.
+  return (info as { messageId?: string } | undefined)?.messageId ?? "";
 }
 
 async function sendViaResend(cfg: EmailConfig, mail: Mail): Promise<void> {
@@ -210,7 +216,11 @@ async function sendViaResend(cfg: EmailConfig, mail: Mail): Promise<void> {
       html: mail.html,
       text: mail.text || stripHtml(mail.html),
       reply_to: mail.replyTo || cfg.replyTo || undefined,
-      attachments: (mail.attachments ?? []).filter((a) => a.content).map((a) => ({ filename: a.filename, content: a.content })),
+      attachments: await Promise.all((mail.attachments ?? []).map(async (a) => {
+        if (a.content) return { filename: a.filename, content: Buffer.isBuffer(a.content) ? a.content.toString("base64") : a.content };
+        if (a.path) { const { readFile } = await import("node:fs/promises"); return { filename: a.filename, content: (await readFile(a.path)).toString("base64") }; }
+        return { filename: a.filename, path: a.href };
+      })),
     }),
   });
   if (!res.ok) {
@@ -226,24 +236,25 @@ export async function sendEmail(mail: Mail): Promise<{ ok: true }> {
   const cfg = await getEmailConfig();
   if (!cfg.enabled) throw new Error("Email is disabled. Enable it in Admin → Email.");
   if (!cfg.fromEmail) throw new Error("A 'From' email address is required (Admin → Email).");
+  let messageId = "";
   try {
     if (cfg.mode === "resend") {
       if (!cfg.resendApiKey) throw new Error("Resend API key is missing (Admin → Email).");
       await sendViaResend(cfg, mail);
     } else {
       if (!cfg.smtpHost) throw new Error("SMTP host is missing (Admin → Email).");
-      await sendViaSmtp(cfg, mail);
+      messageId = await sendViaSmtp(cfg, mail);
     }
   } catch (e) {
-    await logSent(cfg, mail, "failed", e instanceof Error ? e.message : String(e));
+    await logSent(cfg, mail, "failed", e instanceof Error ? e.message : String(e), "");
     throw e;
   }
-  await logSent(cfg, mail, "sent", "");
+  await logSent(cfg, mail, "sent", "", messageId);
   return { ok: true };
 }
 
 // Record an outbound message to the in-panel email client (Sent). Best-effort.
-async function logSent(cfg: EmailConfig, mail: Mail, status: "sent" | "failed", errorText: string): Promise<void> {
+async function logSent(cfg: EmailConfig, mail: Mail, status: "sent" | "failed", errorText: string, messageId = ""): Promise<void> {
   if (mail.log === false) return;
   try {
     const { logMail } = await import("./mailbox");
@@ -253,7 +264,7 @@ async function logSent(cfg: EmailConfig, mail: Mail, status: "sent" | "failed", 
       toAddr: mail.to, cc: mail.cc ?? "", bcc: mail.bcc ?? "",
       subject: mail.subject, html: mail.html, textBody: mail.text ?? "",
       attachments: (mail.attachments ?? []).map((a) => ({ filename: a.filename, url: a.url ?? "" })),
-      inReplyTo: "", status, errorText, isRead: true,
+      messageId, inReplyTo: mail.inReplyTo ?? "", status, errorText, isRead: true,
       category: mail.category ?? "transactional",
     });
   } catch { /* never break a send */ }

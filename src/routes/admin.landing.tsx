@@ -102,6 +102,11 @@ function Editor({ id, onExit }: { id: string | "new"; onExit: () => void }) {
   const [title, setTitle] = useState("Untitled");
   const [slug, setSlug] = useState("");
   const [published, setPublished] = useState(false);
+  const [seoOpen, setSeoOpen] = useState(false);
+  const [metaTitle, setMetaTitle] = useState("");
+  const [metaDescription, setMetaDescription] = useState("");
+  const [ogImage, setOgImage] = useState("");
+  const [noindex, setNoindex] = useState(false);
   const [savedId, setSavedId] = useState<string | null>(id === "new" ? null : id);
   const [ready, setReady] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -114,7 +119,11 @@ function Editor({ id, onExit }: { id: string | "new"; onExit: () => void }) {
       let initial: LandingPage | null = null;
       if (id !== "new") {
         try { initial = await getFn({ data: { id } }); } catch { /* ignore */ }
-        if (initial) { setTitle(initial.title); setSlug(initial.slug); setPublished(initial.published); }
+        if (initial) {
+          setTitle(initial.title); setSlug(initial.slug); setPublished(initial.published);
+          setMetaTitle(initial.metaTitle || ""); setMetaDescription(initial.metaDescription || "");
+          setOgImage(initial.ogImage || ""); setNoindex(!!initial.noindex);
+        }
       }
       const grapesjs = (await import("grapesjs")).default;
       const preset = (await import("grapesjs-preset-webpage")).default;
@@ -126,10 +135,22 @@ function Editor({ id, onExit }: { id: string | "new"; onExit: () => void }) {
         width: "auto",
         fromElement: false,
         storageManager: false,
+        // protectedCss is applied to the CANVAS only (never exported with the
+        // page). The padding keeps a droppable strip above and below the
+        // content so blocks can always be dropped before the first section or
+        // after the last one — without it a full-height hero fills the frame
+        // and there is nowhere to aim.
+        protectedCss:
+          "* { box-sizing: border-box; } body { margin: 0; min-height: 100vh; padding: 24px 0 160px; }" +
+          " body > * { position: relative; }",
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         plugins: [(e: any) => blocksBasic(e, { flexGrid: true }), (e: any) => preset(e, {})],
         pluginsOpts: {},
       });
+      // Make the page body a first-class drop target and show where a block will land.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const wrapper: any = editor.DomComponents.getWrapper();
+      if (wrapper) wrapper.set({ droppable: true, badgable: false, selectable: false, hoverable: false });
       // Register our pre-made rich blocks (hero, columns, pricing, gallery, CTA…).
       const bm = editor.BlockManager;
       for (const b of CUSTOM_BLOCKS) bm.add(b.id, { label: b.label, category: "Sections", content: b.content });
@@ -147,7 +168,7 @@ function Editor({ id, onExit }: { id: string | "new"; onExit: () => void }) {
     const pub = nextPublished ?? published;
     setSaving(true);
     try {
-      const res = await saveFn({ data: { id: savedId ?? undefined, slug, title, html: editor.getHtml(), css: editor.getCss(), published: pub } });
+      const res = await saveFn({ data: { id: savedId ?? undefined, slug, title, html: editor.getHtml(), css: editor.getCss(), metaTitle, metaDescription, ogImage, noindex, published: pub } });
       setSavedId(res.id); setSlug(res.slug); setPublished(res.published);
       qc.invalidateQueries({ queryKey: ["admin-landing"] });
       toast.success(pub ? "Saved & published" : "Saved");
@@ -161,12 +182,29 @@ function Editor({ id, onExit }: { id: string | "new"; onExit: () => void }) {
         <button onClick={onExit} className="inline-flex items-center gap-1.5 text-sm px-2.5 py-1.5 rounded-md border hover:bg-muted"><ArrowLeft className="h-4 w-4" /> Back</button>
         <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Page title" className="border rounded-md px-3 py-1.5 text-sm w-48" />
         <div className="flex items-center gap-1 text-sm text-muted-foreground">/l/<input value={slug} onChange={(e) => setSlug(e.target.value)} placeholder="slug" className="border rounded-md px-2 py-1.5 text-sm w-36" /></div>
+        <button onClick={() => setSeoOpen((o) => !o)} className={`text-sm px-2.5 py-1.5 rounded-md border hover:bg-muted ${seoOpen ? "bg-muted" : ""}`}>SEO</button>
         <div className="ml-auto flex items-center gap-2">
           {savedId && published && <a href={`/l/${slug}`} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1.5 text-sm px-2.5 py-1.5 rounded-md border hover:bg-muted"><Eye className="h-4 w-4" /> View</a>}
           <button onClick={() => save(false)} disabled={!ready || saving} className="inline-flex items-center gap-1.5 text-sm px-3 py-1.5 rounded-md border hover:bg-muted disabled:opacity-60"><Save className="h-4 w-4" /> {saving ? "Saving…" : "Save draft"}</button>
           <button onClick={() => save(true)} disabled={!ready || saving} className="inline-flex items-center gap-1.5 bg-primary text-primary-foreground text-sm font-semibold px-4 py-1.5 rounded-md hover:bg-primary/90 disabled:opacity-60">Publish</button>
         </div>
       </div>
+      {seoOpen && (
+        <div className="border-b bg-muted/30 px-3 py-3 grid gap-2 md:grid-cols-2">
+          <label className="text-xs font-medium">Meta title
+            <input value={metaTitle} onChange={(e) => setMetaTitle(e.target.value)} placeholder={title} className="mt-1 w-full border rounded-md px-3 py-1.5 text-sm font-normal" />
+          </label>
+          <label className="text-xs font-medium">Social image URL (og:image)
+            <input value={ogImage} onChange={(e) => setOgImage(e.target.value)} placeholder="/uploads/… or https://…" className="mt-1 w-full border rounded-md px-3 py-1.5 text-sm font-normal" />
+          </label>
+          <label className="text-xs font-medium md:col-span-2">Meta description
+            <input value={metaDescription} onChange={(e) => setMetaDescription(e.target.value)} maxLength={300} placeholder="One or two sentences shown in Google results." className="mt-1 w-full border rounded-md px-3 py-1.5 text-sm font-normal" />
+          </label>
+          <label className="flex items-center gap-2 text-xs font-medium md:col-span-2">
+            <input type="checkbox" checked={noindex} onChange={(e) => setNoindex(e.target.checked)} /> Hide from search engines (noindex)
+          </label>
+        </div>
+      )}
       <div className="flex-1 min-h-0"><div ref={containerRef} className="h-full" /></div>
       {!ready && <div className="absolute inset-0 top-12 grid place-items-center text-sm text-muted-foreground pointer-events-none">Loading visual editor…</div>}
     </div>

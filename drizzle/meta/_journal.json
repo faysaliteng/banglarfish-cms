@@ -15,6 +15,20 @@
       "when": 1784919207372,
       "tag": "0001_cms_ecom_expansion",
       "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "7",
+      "when": 1786149480942,
+      "tag": "0002_platform_expansion",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "7",
+      "when": 1786149887075,
+      "tag": "0003_landing_seo",
+      "breakpoints": true
     }
   ]
 }

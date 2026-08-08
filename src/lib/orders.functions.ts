@@ -267,7 +267,18 @@ export const createOrder = createServerFn({ method: "POST" })
       }
 
       if (appliedCoupon) {
-        await tx.update(schema.coupons).set({ usage: sql`${schema.coupons.usage} + 1` }).where(eq(schema.coupons.code, appliedCoupon));
+        // Atomic claim: the usage-limit check happens in the same UPDATE that
+        // increments it, so two concurrent checkouts can't both spend the last
+        // use of a single-use coupon (the earlier read-then-write raced).
+        const claimed = await tx
+          .update(schema.coupons)
+          .set({ usage: sql`${schema.coupons.usage} + 1` })
+          .where(and(
+            eq(schema.coupons.code, appliedCoupon),
+            sql`(${schema.coupons.usageLimit} = 0 OR ${schema.coupons.usage} < ${schema.coupons.usageLimit})`,
+          ))
+          .returning({ id: schema.coupons.id });
+        if (claimed.length === 0) throw new Error("This coupon has already been used.");
       }
 
       return inserted;

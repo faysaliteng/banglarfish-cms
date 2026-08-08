@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { adminListMail, adminGetMail, adminSendMail, adminDeleteMail, adminListRecipients, adminMailUpload } from "@/lib/mail.functions";
+import { adminListMail, adminGetMail, adminSendMail, adminDeleteMail, adminListRecipients, adminMailUpload, adminSaveDraft } from "@/lib/mail.functions";
 import { RichTextEditor } from "@/components/admin/RichTextEditor";
 import type { EmailMessage } from "@/lib/config-types";
 import { Inbox, Send, FileText, PenSquare, Paperclip, Reply, Forward, Trash2, X, RefreshCw, Mail as MailIcon, AlertCircle } from "lucide-react";
@@ -11,7 +11,7 @@ import { toast } from "sonner";
 export const Route = createFileRoute("/admin/mail")({ component: MailPage });
 
 type Folder = "inbox" | "sent" | "drafts";
-type Draft = { to: string; cc: string; bcc: string; subject: string; html: string; inReplyTo: string; attachments: { filename: string; url: string }[]; showCc: boolean };
+type Draft = { id?: string; to: string; cc: string; bcc: string; subject: string; html: string; inReplyTo: string; attachments: { filename: string; url: string }[]; showCc: boolean };
 const emptyDraft: Draft = { to: "", cc: "", bcc: "", subject: "", html: "", inReplyTo: "", attachments: [], showCc: false };
 
 function firstEmail(s: string): string {
@@ -105,7 +105,7 @@ function MailPage() {
             <ul className="divide-y">
               {messages.map((m) => (
                 <li key={m.id}>
-                  <button onClick={() => setOpenId(m.id)} className="w-full text-left px-4 py-3 hover:bg-muted/60 flex items-center gap-3">
+                  <button onClick={() => (folder === "drafts" ? startCompose({ id: m.id, to: m.toAddr, cc: m.cc, bcc: m.bcc, subject: m.subject, html: m.html, inReplyTo: m.inReplyTo, attachments: m.attachments.map((a) => ({ filename: a.filename, url: a.url })), showCc: !!(m.cc || m.bcc) }) : setOpenId(m.id))} className="w-full text-left px-4 py-3 hover:bg-muted/60 flex items-center gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className={`truncate text-sm ${m.isRead ? "" : "font-bold"}`}>{folder === "inbox" ? firstEmail(m.fromAddr) : firstEmail(m.toAddr)}</span>
@@ -123,7 +123,7 @@ function MailPage() {
         </div>
       </div>
 
-      {compose && <ComposeModal draft={compose} setDraft={setCompose} recipients={recipients} onClose={() => setCompose(null)} onSent={() => { setCompose(null); qc.invalidateQueries({ queryKey: ["admin-mail"] }); setFolder("sent"); }} />}
+      {compose && <ComposeModal draft={compose} setDraft={setCompose} recipients={recipients} onClose={() => setCompose(null)} onSent={() => { setCompose(null); qc.invalidateQueries({ queryKey: ["admin-mail"] }); setFolder("sent"); }} onDraftSaved={() => qc.invalidateQueries({ queryKey: ["admin-mail"] })} />}
     </div>
   );
 }
@@ -156,9 +156,10 @@ function MessageView({ m, onBack, onReply, onForward, onDelete }: { m: EmailMess
   );
 }
 
-function ComposeModal({ draft, setDraft, recipients, onClose, onSent }: { draft: Draft; setDraft: (d: Draft) => void; recipients: { email: string; name: string }[]; onClose: () => void; onSent: () => void }) {
+function ComposeModal({ draft, setDraft, recipients, onClose, onSent, onDraftSaved }: { draft: Draft; setDraft: (d: Draft) => void; recipients: { email: string; name: string }[]; onClose: () => void; onSent: () => void; onDraftSaved: () => void }) {
   const sendFn = useServerFn(adminSendMail);
   const uploadFn = useServerFn(adminMailUpload);
+  const draftFn = useServerFn(adminSaveDraft);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
   const set = (patch: Partial<Draft>) => setDraft({ ...draft, ...patch });
@@ -179,6 +180,17 @@ function ComposeModal({ draft, setDraft, recipients, onClose, onSent }: { draft:
       if (added.length) setDraft({ ...draft, attachments: [...draft.attachments, ...added] });
     } catch (e) { toast.error(e instanceof Error ? e.message : "Upload failed (images & PDF only)"); }
     finally { setUploading(false); }
+  }
+
+  async function saveDraft() {
+    setBusy(true);
+    try {
+      const res = await draftFn({ data: { id: draft.id, to: draft.to.trim(), cc: draft.cc.trim(), bcc: draft.bcc.trim(), subject: draft.subject.trim(), html: draft.html, inReplyTo: draft.inReplyTo, attachments: draft.attachments } });
+      setDraft({ ...draft, id: res.id });
+      toast.success("Draft saved");
+      onDraftSaved();
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Could not save draft"); }
+    finally { setBusy(false); }
   }
 
   async function send() {
@@ -227,6 +239,7 @@ function ComposeModal({ draft, setDraft, recipients, onClose, onSent }: { draft:
         </div>
         <div className="flex items-center gap-2 p-4 border-t">
           <button onClick={send} disabled={busy} className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-5 py-2.5 rounded-md font-semibold hover:bg-primary/90 disabled:opacity-60"><Send className="h-4 w-4" /> {busy ? "Sending…" : "Send"}</button>
+          <button onClick={saveDraft} disabled={busy} className="text-sm px-3 py-2 rounded-md border hover:bg-muted disabled:opacity-60">Save draft</button>
           <label className="inline-flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border hover:bg-muted cursor-pointer">
             <Paperclip className="h-4 w-4" /> {uploading ? "Uploading…" : "Attach"}
             <input type="file" multiple className="hidden" onChange={(e) => onFiles(e.target.files)} accept="image/*,application/pdf" />

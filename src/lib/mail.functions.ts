@@ -90,12 +90,46 @@ export const adminSendMail = createServerFn({ method: "POST" })
     await sendEmail({
       to: data.to, cc: data.cc || undefined, bcc: data.bcc || undefined,
       subject: data.subject, html: data.html, attachments: atts, category: "manual",
+      inReplyTo: data.inReplyTo || undefined,
     });
     try {
       const { audit } = await import("@/server/audit");
       await audit(actor, "email.send", "email", data.to);
     } catch { /* audit best-effort */ }
     return { ok: true };
+  });
+
+// Save (or update) a draft so the Drafts folder is a real, working folder.
+export const adminSaveDraft = createServerFn({ method: "POST" })
+  .inputValidator((i: unknown) =>
+    z.object({
+      id: z.string().uuid().optional(),
+      to: z.string().trim().max(320).default(""),
+      cc: z.string().trim().max(320).default(""),
+      bcc: z.string().trim().max(320).default(""),
+      subject: z.string().trim().max(300).default(""),
+      html: z.string().max(200_000).default(""),
+      inReplyTo: z.string().max(200).default(""),
+      attachments: z.array(z.object({ filename: z.string().max(260), url: z.string().max(500) })).max(10).default([]),
+    }).parse(i),
+  )
+  .handler(async ({ data }): Promise<{ ok: true; id: string }> => {
+    const { requireMailAccess } = await import("@/server/auth/context");
+    await requireMailAccess();
+    const { db } = await import("@/server/db");
+    const { emailMessages } = await import("@/server/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const values = {
+      folder: "drafts", direction: "outbound", status: "draft", isRead: true, category: "manual",
+      toAddr: data.to, cc: data.cc, bcc: data.bcc, subject: data.subject, html: data.html,
+      inReplyTo: data.inReplyTo, attachments: data.attachments,
+    };
+    if (data.id) {
+      await db.update(emailMessages).set(values).where(eq(emailMessages.id, data.id));
+      return { ok: true, id: data.id };
+    }
+    const [row] = await db.insert(emailMessages).values(values).returning({ id: emailMessages.id });
+    return { ok: true, id: row.id };
   });
 
 // Upload an attachment (mail-access role, incl. support). Reuses the media core.

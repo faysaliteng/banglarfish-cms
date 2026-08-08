@@ -30,6 +30,10 @@ export type LandingPage = {
   title: string;
   html: string;
   css: string;
+  metaTitle: string;
+  metaDescription: string;
+  ogImage: string;
+  noindex: boolean;
   published: boolean;
   updatedAt: string;
 };

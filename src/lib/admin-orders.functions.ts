@@ -202,6 +202,26 @@ export const adminUpdateOrderStatus = createServerFn({ method: "POST" })
     const update: Record<string, unknown> = { status: data.status, updatedAt: new Date() };
     if (data.payment_status) update.paymentStatus = data.payment_status;
     await db.update(orders).set(update).where(eq(orders.id, data.id));
+
+    // Cancelling / refunding returns the reserved units to stock. Guarded on the
+    // PREVIOUS status so re-saving a cancelled order never double-restocks.
+    const RESTOCK = new Set(["cancelled", "refunded"]);
+    if (before && RESTOCK.has(data.status) && !RESTOCK.has(before.status)) {
+      try {
+        const schema = await import("@/server/db/schema");
+        const { sql } = await import("drizzle-orm");
+        for (const it of (before.items ?? []) as { productId: string; variantId?: string | null; qty: number }[]) {
+          if (!it.productId || !it.qty) continue;
+          await db.update(schema.products).set({ stock: sql`${schema.products.stock} + ${it.qty}` }).where(eq(schema.products.id, it.productId));
+          if (it.variantId) {
+            await db.update(schema.productVariants).set({ stock: sql`${schema.productVariants.stock} + ${it.qty}` }).where(eq(schema.productVariants.id, it.variantId));
+          }
+          await db.insert(schema.inventoryLedger).values({ productId: it.productId, variantId: it.variantId ?? null, delta: it.qty, reason: data.status === "refunded" ? "refund" : "cancel", note: before.orderNumber, actorId: user.id });
+        }
+      } catch (e) {
+        console.error("[orders] stock restore failed", e);
+      }
+    }
     await db.insert(orderStatusHistory).values({ orderId: data.id, status: data.status, note: data.payment_status ? `Payment: ${data.payment_status}` : null, actorId: user.id });
     // Notify the customer when the status changes — only for statuses enabled in
     // the per-status notification settings.

@@ -8,7 +8,24 @@ export const Route = createFileRoute("/l/$slug")({
     if (!page) throw notFound();
     return { page };
   },
-  head: ({ loaderData }) => ({ meta: [{ title: loaderData?.page.title ?? "Banglarfish" }] }),
+  head: ({ loaderData }) => {
+    const p = loaderData?.page;
+    if (!p) return { meta: [{ title: "Banglarfish" }] };
+    const title = p.metaTitle || p.title;
+    const desc = p.metaDescription || "";
+    return {
+      meta: [
+        { title },
+        ...(desc ? [{ name: "description", content: desc }] : []),
+        ...(p.noindex ? [{ name: "robots", content: "noindex, nofollow" }] : []),
+        { property: "og:title", content: title },
+        ...(desc ? [{ property: "og:description", content: desc }] : []),
+        { property: "og:type", content: "website" },
+        ...(p.ogImage ? [{ property: "og:image", content: p.ogImage }] : []),
+        { name: "twitter:card", content: p.ogImage ? "summary_large_image" : "summary" },
+      ],
+    };
+  },
   component: LandingView,
 });
 

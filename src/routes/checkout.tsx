@@ -160,6 +160,7 @@ function Checkout() {
             <div className="border-t mt-4 pt-4 space-y-1.5 text-sm">
               <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{formatBDT(totals.subtotal)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Shipping</span><span>{totals.shipping === 0 ? "FREE" : formatBDT(totals.shipping)}</span></div>
+              {totals.tax > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Tax</span><span>{formatBDT(totals.tax)}</span></div>}
               <div className="flex justify-between text-lg font-bold pt-2"><span>Total</span><span className="text-[var(--color-brand)]">{formatBDT(totals.total)}</span></div>
             </div>
             <button disabled={placing} className="w-full mt-5 bg-primary text-primary-foreground py-3 rounded-md font-semibold hover:bg-primary/90 disabled:opacity-60">

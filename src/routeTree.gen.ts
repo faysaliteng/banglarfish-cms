@@ -22,6 +22,7 @@ import { Route as OrderConfirmedRouteImport } from './routes/order-confirmed'
 import { Route as RecipesRouteImport } from './routes/recipes'
 import { Route as ResetPasswordRouteImport } from './routes/reset-password'
 import { Route as ShopRouteImport } from './routes/shop'
+import { Route as UnsubscribeRouteImport } from './routes/unsubscribe'
 import { Route as AuthenticatedAccountRouteImport } from './routes/_authenticated/account'
 import { Route as AdminIndexRouteImport } from './routes/admin.index'
 import { Route as AdminAiRouteImport } from './routes/admin.ai'
@@ -152,6 +153,11 @@ const ResetPasswordRoute = ResetPasswordRouteImport.update({
 const ShopRoute = ShopRouteImport.update({
   id: '/shop',
   path: '/shop',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const UnsubscribeRoute = UnsubscribeRouteImport.update({
+  id: '/unsubscribe',
+  path: '/unsubscribe',
   getParentRoute: () => rootRouteImport,
 } as any)
 const AuthenticatedAccountRoute = AuthenticatedAccountRouteImport.update({
@@ -503,6 +509,7 @@ export interface FileRoutesByFullPath {
   '/recipes': typeof RecipesRoute
   '/reset-password': typeof ResetPasswordRoute
   '/shop': typeof ShopRoute
+  '/unsubscribe': typeof UnsubscribeRoute
   '/account': typeof AuthenticatedAccountRoute
   '/admin/ai': typeof AdminAiRoute
   '/admin/analytics': typeof AdminAnalyticsRoute
@@ -582,6 +589,7 @@ export interface FileRoutesByTo {
   '/recipes': typeof RecipesRoute
   '/reset-password': typeof ResetPasswordRoute
   '/shop': typeof ShopRoute
+  '/unsubscribe': typeof UnsubscribeRoute
   '/account': typeof AuthenticatedAccountRoute
   '/admin/ai': typeof AdminAiRoute
   '/admin/analytics': typeof AdminAnalyticsRoute
@@ -664,6 +672,7 @@ export interface FileRoutesById {
   '/recipes': typeof RecipesRoute
   '/reset-password': typeof ResetPasswordRoute
   '/shop': typeof ShopRoute
+  '/unsubscribe': typeof UnsubscribeRoute
   '/_authenticated/account': typeof AuthenticatedAccountRoute
   '/admin/ai': typeof AdminAiRoute
   '/admin/analytics': typeof AdminAnalyticsRoute
@@ -747,6 +756,7 @@ export interface FileRouteTypes {
     | '/recipes'
     | '/reset-password'
     | '/shop'
+    | '/unsubscribe'
     | '/account'
     | '/admin/ai'
     | '/admin/analytics'
@@ -826,6 +836,7 @@ export interface FileRouteTypes {
     | '/recipes'
     | '/reset-password'
     | '/shop'
+    | '/unsubscribe'
     | '/account'
     | '/admin/ai'
     | '/admin/analytics'
@@ -907,6 +918,7 @@ export interface FileRouteTypes {
     | '/recipes'
     | '/reset-password'
     | '/shop'
+    | '/unsubscribe'
     | '/_authenticated/account'
     | '/admin/ai'
     | '/admin/analytics'
@@ -990,6 +1002,7 @@ export interface RootRouteChildren {
   RecipesRoute: typeof RecipesRoute
   ResetPasswordRoute: typeof ResetPasswordRoute
   ShopRoute: typeof ShopRoute
+  UnsubscribeRoute: typeof UnsubscribeRoute
   CTypeRoute: typeof CTypeRouteWithChildren
   CategorySlugRoute: typeof CategorySlugRoute
   InvoiceOrderNumberRoute: typeof InvoiceOrderNumberRoute
@@ -1089,6 +1102,13 @@ declare module '@tanstack/react-router' {
       path: '/shop'
       fullPath: '/shop'
       preLoaderRoute: typeof ShopRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/unsubscribe': {
+      id: '/unsubscribe'
+      path: '/unsubscribe'
+      fullPath: '/unsubscribe'
+      preLoaderRoute: typeof UnsubscribeRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/_authenticated/account': {
@@ -1732,6 +1752,7 @@ const rootRouteChildren: RootRouteChildren = {
   RecipesRoute: RecipesRoute,
   ResetPasswordRoute: ResetPasswordRoute,
   ShopRoute: ShopRoute,
+  UnsubscribeRoute: UnsubscribeRoute,
   CTypeRoute: CTypeRouteWithChildren,
   CategorySlugRoute: CategorySlugRoute,
   InvoiceOrderNumberRoute: InvoiceOrderNumberRoute,

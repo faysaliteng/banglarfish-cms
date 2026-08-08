@@ -81,12 +81,38 @@ export function useCart() {
   );
 }
 
+/* ---------- Store pricing rules (shipping + tax) ---------- */
+export type PricingConfig = { freeShippingThreshold: number; standardShipping: number; taxPercent: number };
+
+// Mirrors the store settings so the cart/checkout preview matches what the
+// server will charge. Set once at the app root (SSR + client), same as currency.
+// The server remains authoritative — it also applies shipping zones, shipping
+// classes and the tax engine, so this is a best-effort estimate.
+let PRICING: PricingConfig = { freeShippingThreshold: 2000, standardShipping: 80, taxPercent: 0 };
+
+export function setPricing(p: Partial<PricingConfig> | null | undefined) {
+  if (!p) return;
+  const n = (v: unknown, d: number) => (Number.isFinite(Number(v)) ? Number(v) : d);
+  PRICING = {
+    freeShippingThreshold: n(p.freeShippingThreshold, PRICING.freeShippingThreshold),
+    standardShipping: n(p.standardShipping, PRICING.standardShipping),
+    taxPercent: n(p.taxPercent, PRICING.taxPercent),
+  };
+}
+
+export function getPricing(): PricingConfig {
+  return PRICING;
+}
+
 export function cartTotals(lines: CartLine[]) {
   const subtotal = lines.reduce((s, l) => s + l.price * l.qty, 0);
   // All-digital carts never ship (matches the authoritative server calculation).
   const allDigital = lines.length > 0 && lines.every((l) => l.isDigital);
-  const shipping = allDigital || subtotal === 0 ? 0 : subtotal >= 2000 ? 0 : 80;
-  return { subtotal, shipping, total: subtotal + shipping };
+  const freeOver = PRICING.freeShippingThreshold;
+  const shipping =
+    allDigital || subtotal === 0 ? 0 : freeOver > 0 && subtotal >= freeOver ? 0 : PRICING.standardShipping;
+  const tax = Math.round((subtotal * PRICING.taxPercent) / 100);
+  return { subtotal, shipping, tax, total: subtotal + shipping + tax };
 }
 
 /* ---------- Currency (global / multi-currency) ---------- */

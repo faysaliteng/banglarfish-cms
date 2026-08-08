@@ -337,9 +337,27 @@ export const subscribeNewsletter = createServerFn({ method: "POST" })
     // Email the code (best-effort).
     try {
       const { sendEmailSafe, couponEmail } = await import("@/server/email");
-      const mail = await couponEmail(code, 10);
+      const { unsubscribeUrl } = await import("@/server/newsletter");
+      const mail = await couponEmail(code, 10, await unsubscribeUrl(email).catch(() => ""));
       void sendEmailSafe({ ...mail, to: email });
     } catch { /* email best-effort */ }
 
     return { ok: true, issued: true };
+  });
+
+/* ---------- Newsletter unsubscribe (one-click, signed link) ---------- */
+// The token is an HMAC of the address using a per-install key, so an unsubscribe
+// link can't be forged for someone else and no login is needed to honour it.
+export const unsubscribeNewsletter = createServerFn({ method: "POST" })
+  .inputValidator((i: unknown) => z.object({ email: z.string().trim().email().max(255), token: z.string().trim().max(120) }).parse(i))
+  .handler(async ({ data }): Promise<{ ok: boolean }> => {
+    const { unsubscribeToken } = await import("@/server/newsletter");
+    const { db } = await import("@/server/db");
+    const { newsletterSubscribers } = await import("@/server/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const email = data.email.toLowerCase();
+    const expected = await unsubscribeToken(email);
+    if (expected !== data.token) return { ok: false };
+    await db.delete(newsletterSubscribers).where(eq(newsletterSubscribers.email, email));
+    return { ok: true };
   });

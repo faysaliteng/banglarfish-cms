@@ -20,7 +20,7 @@ import { CookieConsent } from "../components/site/CookieConsent";
 import { getTheme } from "@/lib/theme.functions";
 import { getSeo, getBranding, getCustomCodePublic, getI18nState } from "@/lib/site.functions";
 import { getSettings } from "@/lib/catalog.functions";
-import { setCurrency } from "@/lib/cart";
+import { setCurrency, setPricing } from "@/lib/cart";
 import { recordPageView } from "@/lib/analytics.functions";
 import { recordNotFound } from "@/lib/redirects.functions";
 
@@ -164,6 +164,8 @@ function RootComponent() {
   const { theme, seo, customCode, settings, siteUrl, i18n } = Route.useLoaderData();
   // Apply the store currency site-wide (runs on both server render + client).
   setCurrency({ code: settings?.currency, symbol: settings?.currencySymbol, position: settings?.currencyPosition, decimals: settings?.currencyDecimals, thousandSep: settings?.currencyThousandSep });
+  // Keep the cart/checkout preview in step with the store's shipping + tax rules.
+  setPricing({ freeShippingThreshold: settings?.freeShippingThreshold, standardShipping: settings?.standardShipping, taxPercent: settings?.taxPercent });
   const siteCss = (customCode?.css ?? "").replace(/<\s*\//g, "").slice(0, 50000);
 
   const lb = seo.localBusiness;

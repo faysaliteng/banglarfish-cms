@@ -2,9 +2,9 @@ import { createServerFn } from "@tanstack/react-start";
 import { z } from "zod";
 import type { LandingPage } from "./config-types";
 
-type Row = { id: string; slug: string; title: string; html: string; css: string; published: boolean; updatedAt: Date };
+type Row = { id: string; slug: string; title: string; html: string; css: string; metaTitle: string; metaDescription: string; ogImage: string; noindex: boolean; published: boolean; updatedAt: Date };
 function toLanding(r: Row): LandingPage {
-  return { id: r.id, slug: r.slug, title: r.title, html: r.html, css: r.css, published: r.published, updatedAt: (r.updatedAt instanceof Date ? r.updatedAt : new Date(r.updatedAt)).toISOString() };
+  return { id: r.id, slug: r.slug, title: r.title, html: r.html, css: r.css, metaTitle: r.metaTitle ?? "", metaDescription: r.metaDescription ?? "", ogImage: r.ogImage ?? "", noindex: !!r.noindex, published: r.published, updatedAt: (r.updatedAt instanceof Date ? r.updatedAt : new Date(r.updatedAt)).toISOString() };
 }
 
 function slugify(s: string): string {
@@ -66,6 +66,10 @@ export const adminSaveLanding = createServerFn({ method: "POST" })
       title: z.string().trim().min(1).max(160).default("Untitled"),
       html: z.string().max(1_000_000).default(""),
       css: z.string().max(500_000).default(""),
+      metaTitle: z.string().trim().max(200).default(""),
+      metaDescription: z.string().trim().max(400).default(""),
+      ogImage: z.string().trim().max(500).default(""),
+      noindex: z.boolean().default(false),
       published: z.boolean().default(false),
     }).parse(i),
   )
@@ -86,7 +90,7 @@ export const adminSaveLanding = createServerFn({ method: "POST" })
       if (clash.length === 0) { slug = candidate; break; }
     }
 
-    const values = { slug, title: data.title, html: sanitize(data.html), css: sanitizeCss(data.css), published: data.published, updatedAt: new Date() };
+    const values = { slug, title: data.title, html: sanitize(data.html), css: sanitizeCss(data.css), metaTitle: data.metaTitle, metaDescription: data.metaDescription, ogImage: data.ogImage, noindex: data.noindex, published: data.published, updatedAt: new Date() };
     let row;
     if (data.id) {
       [row] = await db.update(landingPages).set(values).where(eq(landingPages.id, data.id)).returning();
@@ -114,11 +118,11 @@ export const adminDeleteLanding = createServerFn({ method: "POST" })
 // Public: fetch a published landing page by slug.
 export const getLandingPublic = createServerFn({ method: "GET" })
   .inputValidator((i: unknown) => z.object({ slug: z.string().max(80) }).parse(i))
-  .handler(async ({ data }): Promise<{ title: string; html: string; css: string } | null> => {
+  .handler(async ({ data }): Promise<{ title: string; html: string; css: string; metaTitle: string; metaDescription: string; ogImage: string; noindex: boolean; slug: string } | null> => {
     const { db } = await import("@/server/db");
     const { landingPages } = await import("@/server/db/schema");
     const { eq, and } = await import("drizzle-orm");
     const [row] = await db.select().from(landingPages).where(and(eq(landingPages.slug, data.slug), eq(landingPages.published, true))).limit(1);
     if (!row) return null;
-    return { title: row.title, html: sanitize(row.html), css: sanitizeCss(row.css) };
+    return { title: row.title, html: sanitize(row.html), css: sanitizeCss(row.css), metaTitle: row.metaTitle ?? "", metaDescription: row.metaDescription ?? "", ogImage: row.ogImage ?? "", noindex: !!row.noindex, slug: row.slug };
   });

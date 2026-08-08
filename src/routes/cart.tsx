@@ -54,6 +54,7 @@ function CartPage() {
             <dl className="space-y-2 text-sm">
               <Row k="Subtotal" v={formatBDT(totals.subtotal)} />
               <Row k="Shipping" v={totals.shipping === 0 ? "FREE" : formatBDT(totals.shipping)} />
+              {totals.tax > 0 && <Row k="Tax" v={formatBDT(totals.tax)} />}
             </dl>
             <div className="border-t my-4" />
             <div className="flex justify-between text-lg font-bold">
