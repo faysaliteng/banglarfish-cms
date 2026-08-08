@@ -86,6 +86,19 @@ To sell something else entirely: **Starter Templates** (one-click Fashion/Electr
 
 ---
 
+## 📧 Self-hosted email (no third-party service)
+
+The platform runs its **own mail server** — transactional sending *and* receiving —
+with no Resend/SendGrid/Brevo account and no per-email cost. Incoming mail for every
+address at your domain is stored in the database and read from a built-in mail client
+in the admin panel.
+
+**[→ docs/SELF-HOSTED-EMAIL.md](docs/SELF-HOSTED-EMAIL.md)** — a complete, reusable
+technical guide: Postfix + OpenDKIM setup, SPF/DKIM/DMARC, routing inbound mail into
+Postgres, app integration, verification steps, and the non-obvious gotchas
+(duplicate SPF records, the localhost TLS trap, `relay_domains` vs `mydestination`).
+It is domain-agnostic — drop it onto any project.
+
 ## 🧩 Extending (for developers)
 
 There's a full **Developer** section inside the admin (**Help & Docs**). In short:
