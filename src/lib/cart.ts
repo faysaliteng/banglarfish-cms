@@ -6,11 +6,24 @@ export type CartLine = {
   slug: string;
   name: string;
   image: string;
+  /** Unit price INCLUDING any option price deltas. */
   price: number;
   weight: string;
   qty: number;
   isDigital?: boolean;
+  /**
+   * Chosen preparation options. Part of the line's identity: the same fish
+   * ordered whole and family-cut are two different things to pack, so they must
+   * not merge into one line just because the product and weight match.
+   */
+  options?: { group: string; choice: string; priceDelta: number }[];
 };
+
+/** Stable signature of everything that makes a line distinct. */
+export function lineKey(l: Pick<CartLine, "productId" | "variantId" | "weight" | "options">): string {
+  const opts = (l.options ?? []).map((o) => `${o.group}=${o.choice}`).sort().join("|");
+  return `${l.productId}::${l.variantId ?? ""}::${l.weight}::${opts}`;
+}
 
 const KEY = "banglarfish_cart_v1";
 type State = { lines: CartLine[] };
@@ -43,27 +56,25 @@ export const cart = {
   },
   add(line: Omit<CartLine, "qty"> & { qty?: number }) {
     const qty = line.qty ?? 1;
-    const idx = state.lines.findIndex(
-      (l) => l.productId === line.productId && l.weight === line.weight,
-    );
+    // Merge on the full identity, not just product + weight: the same fish
+    // ordered whole and family-cut are two different jobs for the packer, and
+    // collapsing them would lose one of the instructions entirely.
+    const key = lineKey(line);
+    const idx = state.lines.findIndex((l) => lineKey(l) === key);
     if (idx >= 0) state.lines[idx].qty += qty;
     else state.lines.push({ ...line, qty });
     state = { lines: [...state.lines] };
     persist();
   },
-  setQty(productId: string, weight: string, qty: number) {
+  setQty(key: string, qty: number) {
     state.lines = state.lines
-      .map((l) =>
-        l.productId === productId && l.weight === weight ? { ...l, qty } : l,
-      )
+      .map((l) => (lineKey(l) === key ? { ...l, qty } : l))
       .filter((l) => l.qty > 0);
     state = { lines: [...state.lines] };
     persist();
   },
-  remove(productId: string, weight: string) {
-    state.lines = state.lines.filter(
-      (l) => !(l.productId === productId && l.weight === weight),
-    );
+  remove(key: string) {
+    state.lines = state.lines.filter((l) => lineKey(l) !== key);
     state = { lines: [...state.lines] };
     persist();
   },

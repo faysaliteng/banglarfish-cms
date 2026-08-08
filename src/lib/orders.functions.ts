@@ -6,6 +6,17 @@ const OrderItemInput = z.object({
   variantId: z.string().uuid().nullable().optional(),
   weight: z.string().max(40).optional().default(""),
   qty: z.number().int().positive().max(999),
+  /**
+   * Chosen preparation options, by NAME only.
+   *
+   * The price delta is deliberately NOT accepted from the client — it is looked
+   * up from the product on the server. Taking a number here would let anyone
+   * post priceDelta: -5000 and walk away with free fish.
+   */
+  options: z.array(z.object({
+    group: z.string().max(60),
+    choice: z.string().max(80),
+  })).max(10).optional().default([]),
 });
 
 const CreateOrderSchema = z.object({
@@ -72,7 +83,7 @@ export const createOrder = createServerFn({ method: "POST" })
       : [];
     const variantById = new Map(variants.map((v) => [v.id, v]));
 
-    type Line = { productId: string; variantId: string | null; name: string; image: string; weight: string; price: number; qty: number; taxClass: string; shippingClass: string; isDigital: boolean };
+    type Line = { productId: string; variantId: string | null; name: string; image: string; weight: string; price: number; qty: number; taxClass: string; shippingClass: string; isDigital: boolean; options: { group: string; choice: string; priceDelta: number }[] };
     const lines: Line[] = [];
     for (const item of data.items) {
       const product = productById.get(item.productId);
@@ -93,10 +104,31 @@ export const createOrder = createServerFn({ method: "POST" })
         weight = v.label;
         available = v.stock;
       }
+      // Resolve the chosen options against the product's own definition. Every
+      // price delta comes from the database, never from the request, and an
+      // unknown group or choice is rejected rather than silently dropped —
+      // dropping it would ship a fish cut the wrong way and look like our fault.
+      const groups = ((product as { optionGroups?: { name: string; required: boolean; choices: { label: string; priceDelta: number }[] }[] }).optionGroups) ?? [];
+      const chosen: { group: string; choice: string; priceDelta: number }[] = [];
+      for (const sel of item.options ?? []) {
+        const g = groups.find((x) => x.name === sel.group);
+        if (!g) throw new Error(`"${sel.group}" is not an option for ${product.name}.`);
+        const c = g.choices.find((x) => x.label === sel.choice);
+        if (!c) throw new Error(`"${sel.choice}" is not a valid ${sel.group} for ${product.name}.`);
+        chosen.push({ group: g.name, choice: c.label, priceDelta: c.priceDelta });
+        price += c.priceDelta;
+      }
+      for (const g of groups) {
+        if (g.required && !chosen.some((c) => c.group === g.name)) {
+          throw new Error(`Please choose ${g.name} for ${product.name}.`);
+        }
+      }
+      if (price < 0) price = 0;   // a mis-set negative delta must not invert the total
+
       // Oversell guard (pre-check; a conditional UPDATE below enforces it atomically too).
       // Digital products are not stock-limited — fulfillment is gated by key availability instead.
       if (!isDigital && available < item.qty) throw new Error(`Sorry, only ${available} of "${product.name}"${weight ? ` (${weight})` : ""} left in stock.`);
-      lines.push({ productId: product.id, variantId, name: product.name, image: product.image, weight, price, qty: item.qty, taxClass, shippingClass, isDigital });
+      lines.push({ productId: product.id, variantId, name: product.name, image: product.image, weight, price, qty: item.qty, taxClass, shippingClass, isDigital, options: chosen });
     }
     const allDigital = lines.length > 0 && lines.every((l) => l.isDigital);
 
@@ -428,7 +460,7 @@ export const getInvoice = createServerFn({ method: "GET" })
       full_name: o.fullName, phone: o.phone, email: o.email,
       address_line1: o.addressLine1, address_line2: o.addressLine2, city: o.city, district: o.district, postal_code: o.postalCode,
       payment_method: o.paymentMethod, payment_status: o.paymentStatus, status: o.status,
-      items: (o.items ?? []) as { name: string; weight: string; qty: number; price: number }[],
+      items: (o.items ?? []) as { name: string; weight: string; qty: number; price: number; options?: { group: string; choice: string }[] }[],
       subtotal: o.subtotal, shipping: o.shipping, discount: o.discount, tax: o.tax, total: o.total,
     };
   });

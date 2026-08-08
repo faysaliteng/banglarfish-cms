@@ -16,6 +16,7 @@ export function toProduct(row: ProductRow, variants: VariantRow[] = []): Product
     compareAt: row.compareAt ?? undefined,
     unit: row.unit,
     weightOptions: sortedVariants.length ? sortedVariants.map((v) => v.label) : (row.weightOptions ?? []),
+    optionGroups: (row.optionGroups ?? []) as Product["optionGroups"],
     image: row.image,
     images: row.images ?? [],
     stock: row.stock,

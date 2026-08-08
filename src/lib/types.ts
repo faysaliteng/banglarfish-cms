@@ -4,6 +4,10 @@ export type Variant = { id: string; label: string; price: number; stock: number;
 
 export type ProductAttribute = { name: string; value: string };
 
+export type ProductOptionChoice = { label: string; priceDelta: number };
+export type ProductOptionGroup = { name: string; nameBn: string; required: boolean; choices: ProductOptionChoice[] };
+export type SelectedOption = { group: string; choice: string; priceDelta: number };
+
 export type Product = {
   id: string;
   slug: string;
@@ -14,6 +18,7 @@ export type Product = {
   compareAt?: number;
   unit: string; // "kg", "piece", etc.
   weightOptions: string[];
+  optionGroups: ProductOptionGroup[];
   image: string;
   images: string[];
   stock: number;
@@ -181,6 +186,12 @@ export type Settings = {
   metaTitle: string;
   metaDescription: string;
   announcement: string;
+  /** Number for the "chat on WhatsApp" button. Falls back to storePhone. */
+  whatsappNumber: string;
+  /** Prefilled first line of that chat. */
+  whatsappGreeting: string;
+  /** Shown under the buy buttons on every product page. Blank hides it. */
+  productNote: string;
 };
 
 export type ShippingZone = {

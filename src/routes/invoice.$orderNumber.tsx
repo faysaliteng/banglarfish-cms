@@ -83,7 +83,12 @@ function InvoicePage() {
           <tbody>
             {inv.items.map((it, i) => (
               <tr key={i}>
-                <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f5f9" }}>{it.name}{it.weight ? ` — ${it.weight}` : ""}</td>
+                <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f5f9" }}>{it.name}{it.weight ? ` — ${it.weight}` : ""}
+                  {(it.options ?? []).length > 0 && (
+                    <div style={{ fontSize: 11, color: "#64748b" }}>
+                      {(it.options ?? []).map((o: { group: string; choice: string }) => `${o.group}: ${o.choice}`).join(" · ")}
+                    </div>
+                  )}</td>
                 <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f5f9", textAlign: "center" }}>{it.qty}</td>
                 <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f5f9", textAlign: "right" }}>{formatBDT(it.price)}</td>
                 <td style={{ padding: "10px 8px", borderBottom: "1px solid #f1f5f9", textAlign: "right" }}>{formatBDT(it.price * it.qty)}</td>

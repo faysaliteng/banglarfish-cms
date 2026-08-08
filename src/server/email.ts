@@ -145,14 +145,19 @@ export async function welcomeTemplate(name: string): Promise<Mail> {
   return { to: "", subject: fillTemplate(t.subject, vars), html: layout(b, fillTemplate(t.body, vars)), text: "" };
 }
 
-export async function orderConfirmTemplate(o: { orderNumber: string; total: number; paid: boolean; items?: { name: string; qty: number }[] }): Promise<Mail> {
+export async function orderConfirmTemplate(o: { orderNumber: string; total: number; paid: boolean; items?: { name: string; qty: number; options?: { group: string; choice: string }[] }[] }): Promise<Mail> {
   const b = await brand();
   const { getEmailTemplates, fillTemplate } = await import("./templates");
   const t = (await getEmailTemplates()).orderConfirm;
-  const rows = (o.items ?? []).map((i) =>
-    `<tr><td style="padding:9px 0;border-bottom:1px solid #eef2f6;color:#1f2937">${i.name}</td>` +
-    `<td style="padding:9px 0;border-bottom:1px solid #eef2f6;text-align:right;color:#6b7280;white-space:nowrap">× ${i.qty}</td></tr>`
-  ).join("");
+  const rows = (o.items ?? []).map((i) => {
+    // Echo the preparation choice back. It is the customer's last chance to spot
+    // that they picked "whole" when they meant "family cut", while it is still
+    // cheap for everyone to fix.
+    const opts = (i.options ?? []).map((x) => `${x.group}: ${x.choice}`).join(" · ");
+    return `<tr><td style="padding:9px 0;border-bottom:1px solid #eef2f6;color:#1f2937">${i.name}` +
+    (opts ? `<div style="color:#6b7280;font-size:13px;margin-top:2px">${opts}</div>` : "") + `</td>` +
+    `<td style="padding:9px 0;border-bottom:1px solid #eef2f6;text-align:right;color:#6b7280;white-space:nowrap">× ${i.qty}</td></tr>`;
+  }).join("");
   const itemsHtml = rows
     ? `<table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="border-collapse:collapse;font-size:14px;margin:4px 0 16px">${rows}</table>`
     : "";

@@ -24,6 +24,11 @@ export const defaultSettings: Settings = {
   metaTitle: "Banglarfish — Fresh Fish Delivered from River to Kitchen",
   metaDescription: "Order fresh hilsa, rohu, prawn, and dried fish online in Bangladesh. Same-day delivery in Dhaka.",
   announcement: "Free delivery on orders over ৳2,000 · Same-day delivery in Dhaka",
+  // Blank by default: an unconfigured WhatsApp button that opens a broken chat
+  // is worse than no button, so the storefront hides it until a number is set.
+  whatsappNumber: "",
+  whatsappGreeting: "Assalamu alaikum, I want to order:",
+  productNote: "",
 };
 
 export const defaultHomepage: Homepage = {

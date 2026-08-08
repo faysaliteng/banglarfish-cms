@@ -55,6 +55,8 @@ export const BUILTIN_TRANSLATIONS: Record<string, Record<string, string>> = {
     "nav.signOut": "সাইন আউট",
     "action.searchPlaceholder": "পণ্য খুঁজুন...",
     "action.addToCart": "কার্টে যোগ করুন",
+    "action.orderNow": "অর্ডার করুন",
+    "action.whatsapp": "Whatsapp করুন",
     "action.viewAll": "সব দেখুন",
     "action.checkout": "চেকআউট",
     "action.continueShopping": "কেনাকাটা চালিয়ে যান",

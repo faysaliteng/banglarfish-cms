@@ -1,6 +1,6 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
-import { useCart, cart, cartTotals, formatBDT } from "@/lib/cart";
+import { useCart, cart, cartTotals, formatBDT, lineKey } from "@/lib/cart";
 import { useI18n } from "@/lib/i18n";
 import { Img } from "@/components/site/Img";
 import { Minus, Plus, X, ShoppingBag } from "lucide-react";
@@ -35,20 +35,25 @@ function CartPage() {
         <div className="grid lg:grid-cols-[1fr_360px] gap-8">
           <div className="border rounded-xl divide-y">
             {lines.map((l) => (
-              <div key={l.productId + l.weight} className="p-4 flex flex-wrap gap-4 items-center">
+              <div key={lineKey(l)} className="p-4 flex flex-wrap gap-4 items-center">
                 <Img src={l.image} alt={l.name} width={160} height={160} sizes="80px" widths={[80, 160]} className="h-20 w-20 rounded-md object-cover shrink-0" />
                 <div className="flex-1 min-w-[8rem]">
                   <Link to="/product/$slug" params={{ slug: l.slug }} className="font-semibold hover:text-primary break-words">{l.name}</Link>
                   <p className="text-xs text-muted-foreground">Weight: {l.weight}</p>
+                  {(l.options ?? []).length > 0 && (
+                    <p className="text-xs text-muted-foreground">
+                      {(l.options ?? []).map((o) => `${o.group}: ${o.choice}`).join(" · ")}
+                    </p>
+                  )}
                   <p className="text-sm font-bold text-[var(--color-brand)] mt-1">{formatBDT(l.price)}</p>
                 </div>
                 <div className="flex items-center border rounded-md shrink-0">
-                  <button onClick={() => cart.setQty(l.productId, l.weight, l.qty - 1)} className="h-11 w-11 grid place-items-center hover:bg-muted"><Minus className="h-3 w-3" /></button>
+                  <button onClick={() => cart.setQty(lineKey(l), l.qty - 1)} className="h-11 w-11 grid place-items-center hover:bg-muted"><Minus className="h-3 w-3" /></button>
                   <span className="w-10 text-center text-sm font-semibold">{l.qty}</span>
-                  <button onClick={() => cart.setQty(l.productId, l.weight, l.qty + 1)} className="h-11 w-11 grid place-items-center hover:bg-muted"><Plus className="h-3 w-3" /></button>
+                  <button onClick={() => cart.setQty(lineKey(l), l.qty + 1)} className="h-11 w-11 grid place-items-center hover:bg-muted"><Plus className="h-3 w-3" /></button>
                 </div>
                 <div className="w-24 text-right font-semibold shrink-0">{formatBDT(l.price * l.qty)}</div>
-                <button onClick={() => cart.remove(l.productId, l.weight)} className="h-11 w-11 grid place-items-center ml-2 text-muted-foreground hover:text-destructive shrink-0"><X className="h-4 w-4" /></button>
+                <button onClick={() => cart.remove(lineKey(l))} className="h-11 w-11 grid place-items-center ml-2 text-muted-foreground hover:text-destructive shrink-0"><X className="h-4 w-4" /></button>
               </div>
             ))}
           </div>

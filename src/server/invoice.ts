@@ -10,7 +10,7 @@ export type InvoiceData = {
   full_name: string; phone: string; email: string | null;
   address_line1: string; address_line2: string | null; city: string; district: string | null; postal_code: string | null;
   payment_method: string; payment_status: string;
-  items: { name: string; weight: string; qty: number; price: number }[];
+  items: { name: string; weight: string; qty: number; price: number; options?: { group: string; choice: string }[] }[];
   subtotal: number; shipping: number; discount: number; tax: number; total: number;
 };
 
@@ -171,7 +171,9 @@ export async function renderInvoicePdf(inv: InvoiceData): Promise<Buffer> {
 
   doc.fontSize(9);
   for (const it of inv.items) {
-    const name = it.weight ? `${it.name} — ${it.weight}` : it.name;
+    const opts = (it.options ?? []).map((o) => `${o.group}: ${o.choice}`).join(", ");
+    const base = it.weight ? `${it.name} — ${it.weight}` : it.name;
+    const name = opts ? `${base} (${opts})` : base;
     doc.font(F(name));
     const nameW = cQty - M - 20;
     const rowH = Math.max(21, doc.heightOfString(name, { width: nameW }) + 11);

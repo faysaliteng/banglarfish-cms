@@ -11,7 +11,7 @@ import { RichTextEditor } from "@/components/admin/RichTextEditor";
 import { AiButton } from "@/components/admin/AiButton";
 import { aiGenerateDescription, aiGenerateMeta } from "@/lib/ai.functions";
 import { toast } from "sonner";
-import type { Product, Variant } from "@/lib/types";
+import type { Product, Variant, ProductOptionGroup, ProductOptionChoice } from "@/lib/types";
 import type { TaxClass, ShippingClass } from "@/lib/config-types";
 
 export const Route = createFileRoute("/admin/products")({ component: AdminProducts });
@@ -36,6 +36,7 @@ type FormState = {
   image: string;
   images: string[];
   weightOptions: string[];
+  optionGroups: ProductOptionGroup[];
   stock: number;
   isBest: boolean;
   isNew: boolean;
@@ -71,6 +72,7 @@ function toForm(p: Row): FormState {
     image: p.image,
     images: p.images ?? [],
     weightOptions: p.weightOptions ?? [],
+    optionGroups: p.optionGroups ?? [],
     stock: p.stock,
     isBest: !!p.isBest,
     isNew: !!p.isNew,
@@ -106,6 +108,7 @@ function emptyForm(category: string, image: string): FormState {
     image,
     images: [],
     weightOptions: ["500g", "1kg"],
+    optionGroups: [],
     stock: 0,
     isBest: false,
     isNew: false,
@@ -231,6 +234,7 @@ function AdminProducts() {
           image: form.image,
           images: form.images.length ? form.images : (form.image ? [form.image] : []),
           weightOptions: form.weightOptions,
+          optionGroups: form.optionGroups,
           stock: form.stock,
           isBest: form.isBest,
           isNew: form.isNew,
@@ -464,6 +468,10 @@ function ProductForm({ initial, categories, media, taxClasses, shippingClasses, 
       <TextField label="Tags (comma sep)" value={p.tags.join(", ")} onChange={(e) => set("tags", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} placeholder="organic, imported" />
 
       <div className="md:col-span-2">
+        <OptionGroupEditor groups={p.optionGroups ?? []} onChange={(g) => set("optionGroups", g)} />
+      </div>
+
+      <div className="md:col-span-2">
         <div className="flex items-center justify-between mb-1.5">
           <label className="block text-sm font-medium">Description</label>
           <AiButton label="Generate with AI" run={async () => (await genDesc({ data: { name: p.name, category: p.category, attributes: p.attributes.map((a) => `${a.name}: ${a.value}`).join(", ") } })).text} onText={(t) => set("description", t)} />
@@ -594,5 +602,167 @@ function ProductForm({ initial, categories, media, taxClasses, shippingClasses, 
         <button type="submit" className="px-5 py-2 rounded-md bg-primary text-primary-foreground text-sm font-semibold">Save product</button>
       </div>
     </form>
+  );
+}
+
+
+/* ------------------------------------------------------------------ *
+ * Product option groups
+ *
+ * Preparation choices — "Processing: whole / family cut", "Head: on / off".
+ * Deliberately separate from variants: a variant is its own priced, stocked SKU,
+ * whereas these adjust the price a little and, more importantly, have to reach
+ * the person holding the knife. Selling the same fish whole and family-cut does
+ * not need two SKUs; it needs one SKU and an instruction.
+ * ------------------------------------------------------------------ */
+
+/** Ready-made groups so nobody has to retype Bengali labels for every product. */
+const OPTION_PRESETS: { id: string; label: string; group: ProductOptionGroup }[] = [
+  {
+    id: "processing",
+    label: "Processing (whole / family cut)",
+    group: {
+      name: "Processing", nameBn: "প্রসেসিং", required: true,
+      choices: [
+        { label: "আস্ত", priceDelta: 0 },
+        { label: "ফ্যামিলি কাটিং", priceDelta: 0 },
+      ],
+    },
+  },
+  {
+    id: "cut-full",
+    label: "Cut style (5 options)",
+    group: {
+      name: "Cut", nameBn: "কাটিং", required: true,
+      choices: [
+        { label: "আস্ত (whole)", priceDelta: 0 },
+        { label: "ফ্যামিলি কাটিং", priceDelta: 0 },
+        { label: "কারি কাট", priceDelta: 0 },
+        { label: "বিরিয়ানি কাট", priceDelta: 0 },
+        { label: "স্টেক", priceDelta: 0 },
+      ],
+    },
+  },
+  {
+    id: "head",
+    label: "Head on / off",
+    group: {
+      name: "Head", nameBn: "মাথা", required: false,
+      choices: [
+        { label: "মাথাসহ", priceDelta: 0 },
+        { label: "মাথা ছাড়া", priceDelta: 0 },
+      ],
+    },
+  },
+  {
+    id: "clean",
+    label: "Cleaning",
+    group: {
+      name: "Cleaning", nameBn: "পরিষ্কার", required: false,
+      choices: [
+        { label: "আঁশ ও নাড়িভুঁড়ি ছাড়ানো", priceDelta: 0 },
+        { label: "যেমন আছে", priceDelta: 0 },
+      ],
+    },
+  },
+];
+
+function OptionGroupEditor({ groups, onChange }: { groups: ProductOptionGroup[]; onChange: (g: ProductOptionGroup[]) => void }) {
+  const patch = (i: number, next: Partial<ProductOptionGroup>) =>
+    onChange(groups.map((g, n) => (n === i ? { ...g, ...next } : g)));
+  const patchChoice = (gi: number, ci: number, next: Partial<ProductOptionChoice>) =>
+    patch(gi, { choices: groups[gi].choices.map((c, n) => (n === ci ? { ...c, ...next } : c)) });
+
+  return (
+    <div className="border rounded-lg p-4 bg-muted/20">
+      <div className="flex flex-wrap items-center justify-between gap-2 mb-1">
+        <label className="block text-sm font-medium">Product options</label>
+        <div className="flex flex-wrap gap-1.5">
+          {OPTION_PRESETS.map((preset) => (
+            <button
+              key={preset.id}
+              type="button"
+              onClick={() => onChange([...groups, JSON.parse(JSON.stringify(preset.group))])}
+              disabled={groups.some((g) => g.name === preset.group.name)}
+              className="text-xs border rounded px-2 py-1 bg-card hover:bg-muted disabled:opacity-40"
+            >
+              + {preset.label}
+            </button>
+          ))}
+        </div>
+      </div>
+      <p className="text-xs text-muted-foreground mb-3">
+        Choices the customer picks before ordering — how the fish should be cut, head on or off.
+        The selection is carried into the cart, the order and the invoice, so whoever packs it sees it.
+      </p>
+
+      {groups.length === 0 && (
+        <p className="text-xs text-muted-foreground border border-dashed rounded p-3 text-center">
+          No options. Add one of the presets above, or a blank group.
+        </p>
+      )}
+
+      {groups.map((g, gi) => (
+        <div key={gi} className="border rounded-md bg-card p-3 mb-2">
+          <div className="grid sm:grid-cols-[1fr_1fr_auto_auto] gap-2 items-end">
+            <label className="block">
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase">Name (English)</span>
+              <input value={g.name} onChange={(e) => patch(gi, { name: e.target.value })} placeholder="Processing" className="mt-1 w-full border rounded px-2 py-1.5 text-sm" />
+            </label>
+            <label className="block">
+              <span className="text-[11px] font-semibold text-muted-foreground uppercase">Name (Bengali)</span>
+              <input value={g.nameBn} onChange={(e) => patch(gi, { nameBn: e.target.value })} placeholder="প্রসেসিং" className="mt-1 w-full border rounded px-2 py-1.5 text-sm" />
+            </label>
+            <label className="inline-flex items-center gap-1.5 text-xs pb-2 whitespace-nowrap">
+              <input type="checkbox" checked={g.required} onChange={(e) => patch(gi, { required: e.target.checked })} /> Required
+            </label>
+            <button type="button" onClick={() => onChange(groups.filter((_, n) => n !== gi))} className="p-2 rounded hover:bg-muted text-destructive mb-0.5" title="Remove this group">
+              <Trash2 className="h-4 w-4" />
+            </button>
+          </div>
+
+          <div className="mt-2 space-y-1.5">
+            {g.choices.map((c, ci) => (
+              <div key={ci} className="flex items-center gap-2">
+                <input
+                  value={c.label}
+                  onChange={(e) => patchChoice(gi, ci, { label: e.target.value })}
+                  placeholder="Choice shown to the customer"
+                  className="flex-1 min-w-0 border rounded px-2 py-1.5 text-sm"
+                />
+                <div className="flex items-center gap-1 shrink-0">
+                  <span className="text-xs text-muted-foreground">price</span>
+                  <input
+                    type="number"
+                    value={c.priceDelta}
+                    onChange={(e) => patchChoice(gi, ci, { priceDelta: Number(e.target.value) || 0 })}
+                    className="w-20 border rounded px-2 py-1.5 text-sm"
+                    title="Added to the unit price. 0 = no change, negative = cheaper."
+                  />
+                </div>
+                <button type="button" onClick={() => patch(gi, { choices: g.choices.filter((_, n) => n !== ci) })} className="p-1.5 rounded hover:bg-muted text-destructive shrink-0">
+                  <Trash2 className="h-3.5 w-3.5" />
+                </button>
+              </div>
+            ))}
+            <button
+              type="button"
+              onClick={() => patch(gi, { choices: [...g.choices, { label: "", priceDelta: 0 }] })}
+              className="text-xs text-primary font-semibold"
+            >
+              + Add choice
+            </button>
+          </div>
+        </div>
+      ))}
+
+      <button
+        type="button"
+        onClick={() => onChange([...groups, { name: "", nameBn: "", required: false, choices: [{ label: "", priceDelta: 0 }] }])}
+        className="text-xs border rounded px-2.5 py-1.5 bg-card hover:bg-muted"
+      >
+        + Blank group
+      </button>
+    </div>
   );
 }

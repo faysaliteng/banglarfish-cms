@@ -81,6 +81,9 @@ function SettingsPage() {
           <Field label="Store email" value={s.storeEmail} onChange={(v) => set("storeEmail", v)} />
           <Field label="Store phone" value={s.storePhone} onChange={(v) => set("storePhone", v)} />
           <Field label="Address" value={s.address} onChange={(v) => set("address", v)} />
+          <Field label="WhatsApp number (order button)" value={s.whatsappNumber ?? ""} onChange={(v) => set("whatsappNumber", v)} placeholder="Leave blank to use the store phone" />
+          <Field label="WhatsApp greeting" value={s.whatsappGreeting ?? ""} onChange={(v) => set("whatsappGreeting", v)} placeholder="Assalamu alaikum, I want to order:" />
+          <Field label="Product page note" value={s.productNote ?? ""} onChange={(v) => set("productNote", v)} placeholder="ওজন গ্রাম হিসেবে কম/ বেশি হলে মূল বিল কিছু কমতে/ বাড়তে পারে" />
           <Field label="Currency code (USD, EUR, BDT…)" value={s.currency} onChange={(v) => set("currency", v)} />
           <Field label="Currency symbol ($, €, ৳)" value={s.currencySymbol ?? ""} onChange={(v) => set("currencySymbol", v)} />
           <label className="block">
@@ -139,11 +142,11 @@ function Card({ title, children }: { title: string; children: React.ReactNode })
     </div>
   );
 }
-function Field({ label, value, onChange, type = "text" }: { label: string; value: string; onChange: (v: string) => void; type?: string }) {
+function Field({ label, value, onChange, type = "text", placeholder }: { label: string; value: string; onChange: (v: string) => void; type?: string; placeholder?: string }) {
   return (
     <label className="block">
       <span className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">{label}</span>
-      <input type={type} value={value} onChange={(e) => onChange(e.target.value)} className="mt-1 w-full border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
+      <input type={type} value={value} placeholder={placeholder} onChange={(e) => onChange(e.target.value)} className="mt-1 w-full border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
     </label>
   );
 }

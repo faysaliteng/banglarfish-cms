@@ -1,7 +1,7 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { Img } from "@/components/site/Img";
 import { SiteLayout } from "@/components/site/SiteLayout";
-import { useCart, cart, cartTotals, formatBDT } from "@/lib/cart";
+import { useCart, cart, cartTotals, formatBDT, lineKey } from "@/lib/cart";
 import { useEffect, useState, useRef } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { me } from "@/lib/auth.functions";
@@ -12,6 +12,14 @@ import { checkGiftCard } from "@/lib/giftcards.functions";
 import { captureCheckout } from "@/lib/checkout.functions";
 import { withBase } from "@/lib/base-path";
 import { toast } from "sonner";
+
+/** Human label for a cart line, including the preparation options. Used for the
+ *  abandoned-cart record so a recovery email says what they actually configured. */
+function itemLabel(l: { name: string; weight: string; options?: { group: string; choice: string }[] }): string {
+  const opts = (l.options ?? []).map((o) => `${o.group}: ${o.choice}`).join(", ");
+  const base = l.weight ? `${l.name} (${l.weight})` : l.name;
+  return opts ? `${base} [${opts}]` : base;
+}
 
 export const Route = createFileRoute("/checkout")({
   head: () => ({ meta: [{ title: "Checkout — Banglarfish" }, { name: "description", content: "Complete your order." }] }),
@@ -51,7 +59,7 @@ function Checkout() {
       const phone = String(fd.get("phone") ?? "").trim();
       const email = String(fd.get("email") ?? "").trim();
       if (!phone && !email) return;
-      void capture({ data: { name: String(fd.get("full_name") ?? ""), phone, email, subtotal: totals.subtotal, items: lines.map((l) => ({ name: l.weight ? `${l.name} (${l.weight})` : l.name, qty: l.qty, price: l.price })) } });
+      void capture({ data: { name: String(fd.get("full_name") ?? ""), phone, email, subtotal: totals.subtotal, items: lines.map((l) => ({ name: itemLabel(l), qty: l.qty, price: l.price })) } });
     } catch { /* ignore */ }
   }
 
@@ -128,7 +136,11 @@ function Checkout() {
           gift_card_code: String(fd.get("gift_card") ?? "").trim() || null,
           email: String(fd.get("email") ?? "").trim() || null,
           idempotency_key: (idemKeyRef.current ||= (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`)),
-          items: lines.map((l) => ({ productId: l.productId, variantId: l.variantId ?? null, weight: l.weight, qty: l.qty })),
+          items: lines.map((l) => ({
+            productId: l.productId, variantId: l.variantId ?? null, weight: l.weight, qty: l.qty,
+            // Names only — the server prices them from the product.
+            options: (l.options ?? []).map((o) => ({ group: o.group, choice: o.choice })),
+          })),
         },
       });
       cart.clear();
@@ -183,7 +195,7 @@ function Checkout() {
             <h3 className="font-semibold text-lg mb-4">Order ({lines.length})</h3>
             <ul className="space-y-3 text-sm max-h-72 overflow-auto">
               {lines.map((l) => (
-                <li key={l.productId + l.weight} className="flex gap-3">
+                <li key={lineKey(l)} className="flex gap-3">
                   <Img src={l.image} alt={l.name} width={96} height={96} sizes="48px" widths={[48, 96]} className="h-12 w-12 rounded object-cover" />
                   <div className="flex-1">
                     <p className="font-medium leading-tight">{l.name}</p>

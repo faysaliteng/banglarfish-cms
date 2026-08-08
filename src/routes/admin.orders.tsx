@@ -20,7 +20,7 @@ export const Route = createFileRoute("/admin/orders")({ component: AdminOrders }
 
 type OrderStatus = "pending" | "confirmed" | "processing" | "packed" | "shipped" | "delivered" | "cancelled" | "refunded";
 type PaymentStatus = "pending" | "paid" | "failed" | "refunded";
-type Item = { productId: string; variantId: string | null; name: string; image: string; weight: string; price: number; qty: number };
+type Item = { productId: string; variantId: string | null; name: string; image: string; weight: string; price: number; qty: number; options?: { group: string; choice: string; priceDelta: number }[] };
 
 type Order = {
   id: string;
@@ -256,6 +256,14 @@ function AdminOrders() {
                     <div className="flex-1">
                       <p className="font-medium">{it.name}</p>
                       <p className="text-xs text-muted-foreground">{it.weight} × {it.qty}</p>
+                      {(it.options ?? []).length > 0 && (
+                        // Prominent on purpose: this is the packing instruction,
+                        // and it is the one line on this screen that changes what
+                        // physically happens to the fish.
+                        <p className="text-xs font-semibold text-primary mt-0.5">
+                          {(it.options ?? []).map((o) => `${o.group}: ${o.choice}`).join(" · ")}
+                        </p>
+                      )}
                     </div>
                     <span className="font-semibold">{formatBDT(it.price * it.qty)}</span>
                   </li>

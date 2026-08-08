@@ -26,6 +26,15 @@ const ProductInput = z.object({
   image: z.string().trim().max(500).default(""),
   images: z.array(z.string()).default([]),
   weightOptions: z.array(z.string()).default([]),
+  optionGroups: z.array(z.object({
+    name: z.string().trim().max(60),
+    nameBn: z.string().trim().max(80).default(""),
+    required: z.boolean().default(false),
+    choices: z.array(z.object({
+      label: z.string().trim().max(80),
+      priceDelta: z.number().int().min(-100000).max(100000).default(0),
+    })).max(20).default([]),
+  })).max(6).default([]),
   stock: z.number().int().nonnegative().default(0),
   isBest: z.boolean().default(false),
   isNew: z.boolean().default(false),
@@ -88,6 +97,11 @@ export const adminUpsertProduct = createServerFn({ method: "POST" })
       image: data.image,
       images: data.images,
       weightOptions: data.weightOptions,
+      // Drop blank rows the editor leaves behind, and groups with nothing to
+      // pick — an empty required group would block every checkout.
+      optionGroups: data.optionGroups
+        .map((g) => ({ ...g, choices: g.choices.filter((c) => c.label.trim()) }))
+        .filter((g) => g.name.trim() && g.choices.length),
       stock: data.stock,
       isBestSeller: data.isBest,
       isNewArrival: data.isNew,

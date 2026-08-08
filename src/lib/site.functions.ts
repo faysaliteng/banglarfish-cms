@@ -513,3 +513,26 @@ export const checkCoupon = createServerFn({ method: "GET" })
     const discount = c.type === "percent" ? Math.round((data.subtotal * c.value) / 100) : Math.min(c.value, data.subtotal);
     return { valid: true, discount, reason: c.type === "percent" ? `${c.value}% off applied` : "Discount applied" };
   });
+
+/**
+ * Public shop contact bits the storefront needs on a product page.
+ * Deliberately a narrow slice of Settings rather than the whole object — this is
+ * served to anonymous visitors, and the settings row also holds payment toggles
+ * and SEO defaults that have no business leaving the server.
+ */
+export const getShopContact = createServerFn({ method: "GET" }).handler(
+  async (): Promise<{ whatsappNumber: string; whatsappGreeting: string; productNote: string }> => {
+    try {
+      const { getSettingsValue } = await import("@/server/settings");
+      const s = await getSettingsValue();
+      return {
+        // Fall back to the shop's phone: most small shops use one number for both.
+        whatsappNumber: s.whatsappNumber || s.storePhone || "",
+        whatsappGreeting: s.whatsappGreeting || "",
+        productNote: s.productNote || "",
+      };
+    } catch {
+      return { whatsappNumber: "", whatsappGreeting: "", productNote: "" };
+    }
+  },
+);

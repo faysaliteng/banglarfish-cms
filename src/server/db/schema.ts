@@ -177,6 +177,7 @@ export const products = pgTable(
     image: text("image").notNull().default(""),
     images: jsonb("images").$type<string[]>().notNull().default([]),
     weightOptions: jsonb("weight_options").$type<string[]>().notNull().default([]),
+    optionGroups: jsonb("option_groups").$type<ProductOptionGroup[]>().notNull().default([]),
     stock: integer("stock").notNull().default(0),
     rating: real("rating").notNull().default(0),
     reviewsCount: integer("reviews_count").notNull().default(0),
@@ -248,6 +249,30 @@ export const inventoryLedger = pgTable("inventory_ledger", {
 });
 
 /* ---------- Orders ---------- */
+/**
+ * A per-product choice group — "Processing: whole / family cut", "Head: on /
+ * off". Distinct from productVariants: a variant is its own priced, stocked SKU,
+ * whereas these are preparation instructions that adjust the price a little and,
+ * more importantly, have to reach the person holding the knife.
+ */
+export type ProductOptionChoice = {
+  label: string;
+  /** Added to the unit price. Negative is allowed (a discount for no cleaning). */
+  priceDelta: number;
+};
+
+export type ProductOptionGroup = {
+  name: string;
+  /** Bengali label; falls back to `name` when empty. */
+  nameBn: string;
+  /** When true the shopper must pick before adding to the cart. */
+  required: boolean;
+  choices: ProductOptionChoice[];
+};
+
+/** What the shopper actually chose, frozen onto the cart line and the order. */
+export type SelectedOption = { group: string; choice: string; priceDelta: number };
+
 export type OrderItem = {
   productId: string;
   variantId: string | null;
@@ -256,6 +281,11 @@ export type OrderItem = {
   weight: string;
   price: number;
   qty: number;
+  /**
+   * Optional for backward compatibility: orders placed before option groups
+   * existed have no field here, and must keep rendering.
+   */
+  options?: SelectedOption[];
 };
 
 export const orders = pgTable(

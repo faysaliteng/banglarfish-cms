@@ -1,5 +1,5 @@
 import { renderTitle } from "@/lib/seo-title";
-import { getSeo } from "@/lib/site.functions";
+import { getSeo, getShopContact } from "@/lib/site.functions";
 import { createFileRoute, notFound, Link } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { ProductCard } from "@/components/site/ProductCard";
@@ -10,7 +10,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { submitReview } from "@/lib/catalog.functions";
 import { toast } from "sonner";
 import { useI18n } from "@/lib/i18n";
-import { Star, ShoppingBag, Truck, ShieldCheck, Snowflake, Minus, Plus } from "lucide-react";
+import { Star, ShoppingBag, Truck, ShieldCheck, Snowflake, Minus, Plus, MessageCircle } from "lucide-react";
+import { useNavigate } from "@tanstack/react-router";
 import type { Variant } from "@/lib/types";
 import { sanitizeHtml } from "@/lib/sanitize-html";
 import { Img } from "@/components/site/Img";
@@ -28,7 +29,8 @@ export const Route = createFileRoute("/product/$slug")({
     if (!data) throw notFound();
     const siteUrl = typeof process !== "undefined" ? (process.env.APP_URL || "").replace(/\/+$/, "") : "";
     const seo = await getSeo().catch(() => null);
-    return { ...data, siteUrl, seo };
+    const shop = await getShopContact().catch(() => ({ whatsappNumber: "", whatsappGreeting: "", productNote: "" }));
+    return { ...data, siteUrl, seo, shop };
   },
   head: ({ loaderData }) => {
     if (!loaderData) return { meta: [{ title: "Product not found" }, { name: "robots", content: "noindex" }] };
@@ -61,18 +63,40 @@ export const Route = createFileRoute("/product/$slug")({
 });
 
 function ProductPage() {
-  const { product, related, reviews, siteUrl } = Route.useLoaderData();
+  const { product, related, reviews, siteUrl, shop } = Route.useLoaderData();
   const hasVariants = product.variants.length > 0;
   const [variant, setVariant] = useState<Variant | null>(product.variants[1] ?? product.variants[0] ?? null);
   const [weightLabel, setWeightLabel] = useState(product.weightOptions[1] ?? product.weightOptions[0] ?? "");
   const [qty, setQty] = useState(1);
-  const { t } = useI18n();
+  const nav = useNavigate();
+  const { t, lang } = useI18n();
+
+  // One selection per option group. Seeded with the first choice so the page is
+  // never in a state where Add to cart is silently blocked with no explanation.
+  const groups = product.optionGroups ?? [];
+  const [picked, setPicked] = useState<Record<string, string>>(() =>
+    Object.fromEntries(groups.filter((g) => g.choices.length).map((g) => [g.name, g.choices[0].label])),
+  );
+
+  const selected = groups
+    .map((g) => {
+      const choice = g.choices.find((c) => c.label === picked[g.name]);
+      return choice ? { group: g.name, choice: choice.label, priceDelta: choice.priceDelta } : null;
+    })
+    .filter(Boolean) as { group: string; choice: string; priceDelta: number }[];
+
+  const optionDelta = selected.reduce((n, o) => n + o.priceDelta, 0);
+  const missing = groups.filter((g) => g.required && !picked[g.name]).map((g) => g.name);
   const [tab, setTab] = useState<"desc" | "shipping" | "reviews">("desc");
   const [added, setAdded] = useState(false);
 
-  const unitPrice = variant?.price ?? product.price;
+  const unitPrice = (variant?.price ?? product.price) + optionDelta;
 
-  function addToCart() {
+  function addToCart(): boolean {
+    if (missing.length) {
+      toast.error(`Please choose ${missing.join(", ")} first.`);
+      return false;
+    }
     cart.add({
       productId: product.id,
       variantId: variant?.id ?? null,
@@ -83,9 +107,36 @@ function ProductPage() {
       weight: variant?.label ?? weightLabel,
       qty,
       isDigital: !!product.isDigital,
+      options: selected.length ? selected : undefined,
     });
     setAdded(true);
     setTimeout(() => setAdded(false), 1500);
+    return true;
+  }
+
+  /** Add, then go straight to checkout — most orders here come from someone who
+   *  already knows what they want, and a detour via the cart loses them. */
+  function orderNow() {
+    if (addToCart()) nav({ to: "/checkout" });
+  }
+
+  // Falls back to the shop phone server-side; empty means the button is hidden,
+  // because a WhatsApp button that opens a broken chat is worse than none.
+  const waNumber = shop.whatsappNumber || "";
+
+  function whatsapp() {
+    const digits = waNumber.replace(/[^0-9]/g, "");
+    if (!digits) return;
+    const chosen = selected.map((o) => `${o.group}: ${o.choice}`).join(", ");
+    const msg = [
+      shop.whatsappGreeting || "I want to order:",
+      `${product.name}${product.bn ? ` (${product.bn})` : ""}`,
+      `Weight: ${variant?.label ?? weightLabel}`,
+      chosen,
+      `Quantity: ${qty}`,
+      siteUrl ? `${siteUrl}/product/${product.slug}` : "",
+    ].filter(Boolean).join("\n");
+    window.open(`https://wa.me/${digits}?text=${encodeURIComponent(msg)}`, "_blank", "noopener");
   }
 
   return (
@@ -141,16 +192,66 @@ function ProductPage() {
             </div>
           </div>
 
+          {groups.map((g) => (
+            <div key={g.name} className="mt-5">
+              <label className="text-sm font-semibold">
+                {lang === "bn" && g.nameBn ? g.nameBn : g.name}
+                {g.required && <span className="text-destructive ml-1">*</span>}
+              </label>
+              <div className="mt-2 flex flex-wrap gap-2">
+                {g.choices.map((c) => {
+                  const on = picked[g.name] === c.label;
+                  return (
+                    <button
+                      key={c.label}
+                      onClick={() => setPicked((p) => ({ ...p, [g.name]: c.label }))}
+                      className={`px-4 py-2.5 rounded-md border text-sm font-medium transition ${on ? "border-primary bg-primary/10 text-primary" : "hover:border-foreground/30"}`}
+                    >
+                      {c.label}
+                      {c.priceDelta !== 0 && (
+                        <span className={`ml-1.5 text-xs ${on ? "" : "text-muted-foreground"}`}>
+                          {c.priceDelta > 0 ? "+" : "\u2212"}{formatBDT(Math.abs(c.priceDelta))}
+                        </span>
+                      )}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          ))}
+
           <div className="mt-6 flex flex-wrap gap-3 items-center">
             <div className="flex items-center border rounded-md">
               <button onClick={() => setQty(Math.max(1, qty - 1))} className="p-2.5 hover:bg-muted" aria-label="Decrease quantity"><Minus className="h-4 w-4" /></button>
               <span className="w-12 text-center font-semibold">{qty}</span>
               <button onClick={() => setQty(qty + 1)} className="p-2.5 hover:bg-muted" aria-label="Increase quantity"><Plus className="h-4 w-4" /></button>
             </div>
-            <button onClick={addToCart} className="flex-1 min-w-[200px] inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground px-6 py-3 rounded-md font-semibold hover:bg-primary/90 transition">
+            <button onClick={() => addToCart()} className="flex-1 min-w-[200px] inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground px-6 py-3 rounded-md font-semibold hover:bg-primary/90 transition">
               <ShoppingBag className="h-5 w-5" /> {added ? "Added ✓" : "Add to Cart"}
             </button>
           </div>
+
+          {/* Straight to checkout. Most orders here come from someone who already
+              knows what they want, and making them visit the cart first loses them. */}
+          <button
+            onClick={orderNow}
+            className="mt-3 w-full inline-flex items-center justify-center gap-2 bg-brand text-white px-6 py-3.5 rounded-md font-bold hover:brightness-95 transition"
+          >
+            <ShoppingBag className="h-5 w-5" /> {t("action.orderNow", "Order now")}
+          </button>
+
+          {waNumber && (
+            <button
+              onClick={whatsapp}
+              className="mt-3 w-full inline-flex items-center justify-center gap-2 bg-[#0f172a] text-white px-6 py-3.5 rounded-md font-bold hover:brightness-125 transition"
+            >
+              <MessageCircle className="h-5 w-5" /> {t("action.whatsapp", "Order on WhatsApp")}
+            </button>
+          )}
+
+          {shop.productNote && (
+            <p className="mt-4 text-sm font-semibold leading-relaxed">{shop.productNote}</p>
+          )}
 
           <div className="mt-6 grid grid-cols-3 gap-3 pt-6 border-t">
             <Perk icon={<Truck className="h-5 w-5" />} label="Same-day delivery" />
