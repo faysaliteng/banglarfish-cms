@@ -2,10 +2,16 @@ import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import {
   Crop as CropIcon, RotateCcw, RotateCw, FlipHorizontal, FlipVertical, Sliders,
   Maximize2, Download, X, Check, RefreshCw, Wand2, Scissors, PenLine, Sparkles, Trash2, Undo2,
+  Pipette, Brush, Eraser, Gauge, SlidersHorizontal,
 } from "lucide-react";
 import { useServerFn } from "@tanstack/react-start";
 import { aiImageStatus, aiEditImage } from "@/lib/ai.functions";
-import { removeBackground, fillTransparent, drawMarkups, dataUrlBytes, prettyBytes, type Markup, type MarkupKind } from "./image-tools";
+import { fillTransparent, drawMarkups, type Markup, type MarkupKind } from "./image-tools";
+import { removeBackgroundAdvanced, DEFAULT_MATTING, type MattingOptions } from "./matting";
+import {
+  encodeAt, fitToSize, fitToQuality, compareFormats, quantize, prettyBytes, qualityLabel,
+  formatLabel, blobToDataUrl, type EncodeResult, type Format, type Strategy,
+} from "./compress-tools";
 import { toast } from "sonner";
 
 /**
@@ -56,9 +62,31 @@ export function ImageEditor({
   // The working source. Background removal and AI edits replace it, so every
   // later operation (crop, markup, export) builds on the new pixels.
   const [workSrc, setWorkSrc] = useState(src);
-  const [bgTolerance, setBgTolerance] = useState(28);
-  const [bgFeather, setBgFeather] = useState(2);
+  const [matting, setMatting] = useState<MattingOptions>(DEFAULT_MATTING);
   const [bgFill, setBgFill] = useState("");
+  const [removedPct, setRemovedPct] = useState<number | null>(null);
+  // The un-committed cut-out. Kept out of the undo stack so a dozen slider
+  // tweaks don't become a dozen undo steps; "Apply" is what commits.
+  const [preview, setPreviewUrl] = useState<string | null>(null);
+  const [picking, setPicking] = useState(false);
+  // Manual corrections: 1 = keep (foreground), 2 = remove (background). Held at
+  // full source resolution and fed back into every re-run, so tweaking a slider
+  // never discards the brushwork.
+  const strokes = useRef<Uint8Array | null>(null);
+  const [brush, setBrush] = useState<"off" | "keep" | "erase">("off");
+  const [brushSize, setBrushSize] = useState(28);
+  const [strokeCount, setStrokeCount] = useState(0);
+  const painting = useRef(false);
+
+  /* compression */
+  const [strategy, setStrategy] = useState<Strategy>("quality");
+  const [targetKb, setTargetKb] = useState(200);
+  const [minSsim, setMinSsim] = useState(0.98);
+  const [pngColors, setPngColors] = useState(0);   // 0 = full colour
+  const [pngDither, setPngDither] = useState(false);
+  const [result, setResult] = useState<EncodeResult | null>(null);
+  const [comparison, setComparison] = useState<EncodeResult[] | null>(null);
+  const [encoding, setEncoding] = useState("");
   const [markups, setMarkups] = useState<Markup[]>([]);
   const [tool, setTool] = useState<MarkupKind>("arrow");
   const [mColor, setMColor] = useState("#ef4444");
@@ -233,23 +261,191 @@ export function ImageEditor({
     return { c, x };
   }, [img]);
 
-  async function cutOutBackground(fill?: string) {
-    const b = baseCanvas();
+  /**
+   * The pristine source for cut-out work.
+   *
+   * Always the ORIGINAL image, never the previewed result — re-running against
+   * an already-transparent image would key out whatever survived the last pass,
+   * eating the subject a little more each time a slider moves.
+   */
+  const cutoutSource = useRef<HTMLImageElement | null>(null);
+  useEffect(() => { cutoutSource.current = null; setRemovedPct(null); strokes.current = null; setStrokeCount(0); }, [workSrc]);
+
+  const sourceCanvas = useCallback(() => {
+    const base = cutoutSource.current ?? img;
+    if (!base) return null;
+    const c = document.createElement("canvas");
+    c.width = base.naturalWidth; c.height = base.naturalHeight;
+    const x = c.getContext("2d", { willReadFrequently: true });
+    if (!x) return null;
+    x.drawImage(base, 0, 0);
+    return { c, x };
+  }, [img]);
+
+  /** Run the matte and show it, without committing to history. */
+  const runCutout = useCallback(async (fill?: string) => {
+    if (!img) return;
+    if (!cutoutSource.current) cutoutSource.current = img;
+    const b = sourceCanvas();
     if (!b) return;
     setBusy(true);
-    // Yield a frame so the button's busy state actually paints before the
-    // flood fill blocks the main thread on a large image.
+    // Yield a frame so the busy state paints before the analysis blocks the
+    // main thread; on a large image this is a second or two of solid work.
     await new Promise((r) => setTimeout(r, 30));
     try {
-      removeBackground(b.x, b.c.width, b.c.height, { tolerance: bgTolerance, feather: bgFeather });
+      const matte = removeBackgroundAdvanced(b.x, b.c.width, b.c.height, matting, strokes.current ?? undefined);
+      if (matte) setRemovedPct(Math.round(matte.removedFraction * 100));
       if (fill) fillTransparent(b.x, b.c.width, b.c.height, fill);
-      pushWork(b.c.toDataURL("image/png"));
-      if (!fill) setFormat("image/png");   // only PNG/WebP keep the alpha channel
-      toast.success(fill ? "Background replaced" : "Background removed");
-    } catch {
-      toast.error("Could not process this image");
+      const url = b.c.toDataURL("image/png");
+      // Swap the preview without pushing history — only "Apply" commits — so a
+      // dozen slider tweaks do not become a dozen undo steps.
+      setPreviewUrl(url);
+      if (!fill) setFormat("image/png");   // only PNG and WebP keep an alpha channel
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not process this image");
     } finally { setBusy(false); }
+  }, [img, matting, sourceCanvas]);
+
+  function commitCutout() {
+    if (!preview) return;
+    pushWork(preview);
+    setPreviewUrl(null);
+    cutoutSource.current = null;
+    strokes.current = null;
+    setStrokeCount(0);
+    toast.success("Background applied");
   }
+
+  function discardCutout() {
+    setPreviewUrl(null);
+    setRemovedPct(null);
+    strokes.current = null;
+    setStrokeCount(0);
+  }
+
+  /* ---------- refinement brush ---------- */
+
+  function ensureStrokes(): Uint8Array | null {
+    const base = cutoutSource.current ?? img;
+    if (!base) return null;
+    if (!strokes.current || strokes.current.length !== base.naturalWidth * base.naturalHeight) {
+      strokes.current = new Uint8Array(base.naturalWidth * base.naturalHeight);
+    }
+    return strokes.current;
+  }
+
+  /** Paint a disc of keep/erase into the stroke buffer at source resolution. */
+  function paintAt(e: React.PointerEvent) {
+    const base = cutoutSource.current ?? img;
+    const buf = ensureStrokes();
+    if (!base || !buf || brush === "off") return;
+    const box = stageRef.current?.getBoundingClientRect();
+    if (!box) return;
+
+    const px = ((e.clientX - box.left) / box.width) * base.naturalWidth;
+    const py = ((e.clientY - box.top) / box.height) * base.naturalHeight;
+    // Brush size is a share of the image width, so it feels the same on a
+    // 600px thumbnail and a 4000px original.
+    const r = (brushSize / 100) * base.naturalWidth * 0.06;
+    const r2 = r * r;
+    const value = brush === "keep" ? 1 : 2;
+    const w = base.naturalWidth, h = base.naturalHeight;
+
+    for (let y = Math.max(0, Math.floor(py - r)); y <= Math.min(h - 1, Math.ceil(py + r)); y++) {
+      for (let x = Math.max(0, Math.floor(px - r)); x <= Math.min(w - 1, Math.ceil(px + r)); x++) {
+        const dx = x - px, dy = y - py;
+        if (dx * dx + dy * dy <= r2) buf[y * w + x] = value;
+      }
+    }
+    setStrokeCount((n) => n + 1);
+  }
+
+  /** Eyedropper: sample the ORIGINAL pixels, not the previewed cut-out — the
+   *  preview may already be transparent where the user is trying to click. */
+  function pickColorAt(e: React.PointerEvent) {
+    const b = sourceCanvas();
+    const box = stageRef.current?.getBoundingClientRect();
+    if (!b || !box) return;
+    const x = Math.round(((e.clientX - box.left) / box.width) * b.c.width);
+    const y = Math.round(((e.clientY - box.top) / box.height) * b.c.height);
+    const d = b.x.getImageData(Math.max(0, Math.min(b.c.width - 1, x)), Math.max(0, Math.min(b.c.height - 1, y)), 1, 1).data;
+    setMatting((m) => ({ ...m, mode: "chroma", keyColor: [d[0], d[1], d[2]] }));
+    setPicking(false);
+  }
+
+  function bgDown(e: React.PointerEvent) {
+    e.preventDefault();
+    (e.target as Element).setPointerCapture?.(e.pointerId);
+    if (picking) { pickColorAt(e); return; }
+    if (!cutoutSource.current) cutoutSource.current = img;
+    painting.current = true;
+    paintAt(e);
+  }
+  function bgMove(e: React.PointerEvent) {
+    if (!painting.current || picking) return;
+    paintAt(e);
+  }
+  function bgUp() {
+    if (!painting.current) return;
+    painting.current = false;
+    // Re-run once on release rather than on every pointermove: a full matte is
+    // far too expensive to compute mid-stroke.
+    runCutout();
+  }
+
+  // Picking a colour changes the whole basis of the matte, so re-run at once.
+  useEffect(() => {
+    if (matting.mode === "chroma" && matting.keyColor) runCutout();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [matting.keyColor]);
+
+  /* ---------- compression ---------- */
+
+  /** The finished canvas, with optional palette reduction for PNG. */
+  const exportCanvas = useCallback((): HTMLCanvasElement | null => {
+    const c = render();
+    if (!c || format !== "image/png" || pngColors === 0) return c;
+    const x = c.getContext("2d", { willReadFrequently: true });
+    if (!x) return c;
+    x.putImageData(quantize(x.getImageData(0, 0, c.width, c.height), pngColors, pngDither), 0, 0);
+    return c;
+  }, [render, format, pngColors, pngDither]);
+
+  const runCompression = useCallback(async () => {
+    const c = exportCanvas();
+    if (!c) return;
+    setComparison(null);
+    setEncoding("Encoding…");
+    try {
+      let r: EncodeResult;
+      if (strategy === "target-size") {
+        setEncoding("Searching for the best quality that fits…");
+        r = await fitToSize(c, format, targetKb * 1024, (q) => setEncoding(`Trying quality ${Math.round(q * 100)}%…`));
+      } else if (strategy === "target-quality") {
+        setEncoding("Finding the smallest file at this quality…");
+        r = await fitToQuality(c, format, minSsim, (q, sv) => setEncoding(`Quality ${Math.round(q * 100)}% → ${(sv * 100).toFixed(1)}% match`));
+      } else {
+        r = await encodeAt(c, format, quality);
+      }
+      setResult(r);
+      if (strategy !== "quality") setQuality(r.quality);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Encoding failed");
+    } finally { setEncoding(""); }
+  }, [exportCanvas, strategy, format, quality, targetKb, minSsim]);
+
+  const runComparison = useCallback(async () => {
+    const c = exportCanvas();
+    if (!c) return;
+    setEncoding("Comparing formats…");
+    try {
+      const rows = await compareFormats(c, [0.92, 0.82, 0.68], (d, t) => setEncoding(`Encoding ${d}/${t}…`));
+      setComparison(rows);
+      setResult(null);
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Comparison failed");
+    } finally { setEncoding(""); }
+  }, [exportCanvas]);
 
   async function runAiEdit(instruction: string) {
     if (!img || !instruction.trim()) return;
@@ -280,17 +476,17 @@ export function ImageEditor({
     setCrop(FULL);
   }
 
-  // Compression preview. Encoding is not free, so it is debounced and only runs
-  // while the Export tab is open.
+  // Measure the real encode whenever the Export tab is open and something that
+  // affects the output changes. Debounced — every run is a full encode plus an
+  // SSIM pass, which is far too expensive to do per keystroke.
   useEffect(() => {
-    if (tab !== "resize" || !img) { setEstimate(""); return; }
-    const t = setTimeout(() => {
-      const c = render();
-      if (!c) return;
-      try { setEstimate(prettyBytes(dataUrlBytes(c.toDataURL(format, quality)))); } catch { setEstimate(""); }
-    }, 300);
+    if (tab !== "resize" || !img) return;
+    const t = setTimeout(() => { runCompression(); }, 400);
     return () => clearTimeout(t);
-  }, [tab, img, render, format, quality]);
+    // runCompression is intentionally excluded: it changes identity on every
+    // quality tweak, which would restart the timer forever.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [tab, img, format, quality, strategy, targetKb, minSsim, pngColors, pngDither, outW, outH]);
 
   async function save() {
     const canvas = render();
@@ -440,7 +636,7 @@ export function ImageEditor({
             ) : (
               <div ref={stageRef} className="relative select-none touch-none" style={{ maxWidth: "100%" }}>
                 <img
-                  src={workSrc} alt=""
+                  src={preview ?? workSrc} alt=""
                   className="block max-h-[60vh] max-w-full"
                   style={{ filter: filterCss || undefined, transform: `rotate(${rotation}deg) scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})` }}
                   draggable={false}
@@ -450,6 +646,16 @@ export function ImageEditor({
                   className="absolute inset-0 h-full w-full"
                   style={{ transform: `rotate(${rotation}deg) scale(${flipH ? -1 : 1}, ${flipV ? -1 : 1})`, pointerEvents: "none" }}
                 />
+                {tab === "bg" && (picking || brush !== "off") && (
+                  <div
+                    className="absolute inset-0"
+                    style={{ cursor: picking ? "crosshair" : "cell" }}
+                    onPointerDown={bgDown}
+                    onPointerMove={bgMove}
+                    onPointerUp={bgUp}
+                    onPointerCancel={bgUp}
+                  />
+                )}
                 {tab === "markup" && (
                   <div
                     className="absolute inset-0 cursor-crosshair"
@@ -554,54 +760,139 @@ export function ImageEditor({
 
               {tab === "bg" && (
                 <>
-                  <p className="text-[11px] text-muted-foreground">
-                    Removes the backdrop behind the subject. It fills inward from the edges, so a
-                    white plate <em>inside</em> the product is kept &mdash; only the surrounding
-                    background goes.
-                  </p>
-                  <Slider label="Tolerance" value={bgTolerance} min={2} max={70} onChange={setBgTolerance} unit="%" />
-                  <Slider label="Edge softness" value={bgFeather} min={0} max={8} onChange={setBgFeather} unit="px" />
-                  <button onClick={() => cutOutBackground()} disabled={busy || !img} className="w-full inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground text-sm font-semibold py-2 rounded-md disabled:opacity-60">
-                    <Scissors className="h-4 w-4" /> {busy ? "Working\u2026" : "Remove background"}
-                  </button>
-                  <Field label="Or replace it with a colour">
-                    <div className="grid grid-cols-4 gap-1.5">
-                      {["#ffffff", "#f1f5f9", "#0f172a", "#0ea5b7"].map((c) => (
-                        <button key={c} onClick={() => cutOutBackground(c)} disabled={busy} className="h-8 rounded-md border disabled:opacity-60" style={{ background: c }} title="Replace background with this colour" />
-                      ))}
+                  <Field label="How to find the background">
+                    <div className="grid grid-cols-2 gap-1.5">
+                      <button onClick={() => setMatting({ ...matting, mode: "auto" })} className={`text-xs py-1.5 rounded-md border ${matting.mode === "auto" ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted"}`}>From the edges</button>
+                      <button onClick={() => { setMatting({ ...matting, mode: "chroma" }); setPicking(true); }} className={`text-xs py-1.5 rounded-md border inline-flex items-center justify-center gap-1 ${matting.mode === "chroma" ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted"}`}>
+                        <Pipette className="h-3 w-3" /> Pick a colour
+                      </button>
                     </div>
-                    <div className="flex items-center gap-2 mt-2">
-                      <input type="color" value={bgFill || "#ffffff"} onChange={(e) => setBgFill(e.target.value)} className="h-8 w-10 border rounded" />
-                      <button onClick={() => cutOutBackground(bgFill || "#ffffff")} disabled={busy} className="flex-1 text-xs py-1.5 rounded-md border hover:bg-muted disabled:opacity-60">Apply custom colour</button>
-                    </div>
+                    <p className="text-[11px] text-muted-foreground mt-1.5">
+                      {matting.mode === "auto"
+                        ? "Fills inward from the frame edge, so a white plate inside the product survives."
+                        : picking
+                          ? "Click the background on the image."
+                          : "Removes that colour everywhere, even where it doesn't touch the edge."}
+                    </p>
+                    {matting.mode === "chroma" && matting.keyColor && (
+                      <div className="flex items-center gap-2 mt-1.5">
+                        <span className="h-5 w-5 rounded border" style={{ background: `rgb(${matting.keyColor.join(",")})` }} />
+                        <button onClick={() => setPicking(true)} className="text-xs underline text-muted-foreground">pick again</button>
+                      </div>
+                    )}
                   </Field>
+
+                  <Slider label="Tolerance" value={matting.tolerance} min={2} max={70} onChange={(v) => setMatting({ ...matting, tolerance: v })} unit="%" />
+                  <Slider label="Follow gradients" value={matting.gradientTolerance} min={0} max={30} onChange={(v) => setMatting({ ...matting, gradientTolerance: v })} unit="%" />
+                  <Slider label="Edge detail" value={matting.softness} min={0} max={12} onChange={(v) => setMatting({ ...matting, softness: v })} unit="px" />
+                  {matting.softness > 0 ? (
+                    <Slider label="Tighten edge" value={matting.shrink} min={0} max={60} onChange={(v) => setMatting({ ...matting, shrink: v })} unit="%" />
+                  ) : (
+                    <p className="text-[11px] text-muted-foreground">
+                      <strong>Tighten edge</strong> needs some edge detail to work on — raise it above 0.
+                    </p>
+                  )}
+
+                  <details className="border-t pt-3">
+                    <summary className="text-xs font-semibold cursor-pointer inline-flex items-center gap-1.5">
+                      <SlidersHorizontal className="h-3.5 w-3.5" /> More
+                    </summary>
+                    <div className="mt-2 space-y-2">
+                      <Slider label="Clean up specks" value={matting.despeckle} min={0} max={400} onChange={(v) => setMatting({ ...matting, despeckle: v })} unit="px" />
+                      <label className="flex items-start gap-2 text-xs cursor-pointer">
+                        <input type="checkbox" checked={matting.decontaminate} onChange={(e) => setMatting({ ...matting, decontaminate: e.target.checked })} className="mt-0.5" />
+                        <span>Remove colour fringe<span className="block text-[10px] text-muted-foreground">Strips backdrop colour out of the soft edge, so the cut-out doesn't look pasted on.</span></span>
+                      </label>
+                      <label className="flex items-start gap-2 text-xs cursor-pointer">
+                        <input type="checkbox" checked={matting.global} onChange={(e) => setMatting({ ...matting, global: e.target.checked })} className="mt-0.5" />
+                        <span>Also clear enclosed gaps<span className="block text-[10px] text-muted-foreground">Backdrop showing through a handle, a gill or a gap between prawns.</span></span>
+                      </label>
+                    </div>
+                  </details>
+
+                  <button onClick={() => runCutout()} disabled={busy || !img} className="w-full inline-flex items-center justify-center gap-2 bg-primary text-primary-foreground text-sm font-semibold py-2 rounded-md disabled:opacity-60">
+                    <Scissors className="h-4 w-4" /> {busy ? "Working…" : preview ? "Update" : "Remove background"}
+                  </button>
+
+                  {removedPct !== null && (
+                    <p className={`text-[11px] ${removedPct > 92 || removedPct < 3 ? "text-amber-600" : "text-muted-foreground"}`}>
+                      {removedPct}% of the frame removed.
+                      {removedPct > 92 && " That's nearly everything — lower the tolerance."}
+                      {removedPct < 3 && " Barely anything matched — raise the tolerance, or pick the colour by hand."}
+                    </p>
+                  )}
+
+                  {preview && (
+                    <>
+                      <Field label="Touch it up">
+                        <div className="grid grid-cols-3 gap-1.5">
+                          <button onClick={() => setBrush(brush === "keep" ? "off" : "keep")} className={`text-xs py-1.5 rounded-md border inline-flex items-center justify-center gap-1 ${brush === "keep" ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted"}`}>
+                            <Brush className="h-3 w-3" /> Keep
+                          </button>
+                          <button onClick={() => setBrush(brush === "erase" ? "off" : "erase")} className={`text-xs py-1.5 rounded-md border inline-flex items-center justify-center gap-1 ${brush === "erase" ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted"}`}>
+                            <Eraser className="h-3 w-3" /> Erase
+                          </button>
+                          <button onClick={() => { strokes.current = null; setStrokeCount(0); runCutout(); }} disabled={!strokeCount} className="text-xs py-1.5 rounded-md border hover:bg-muted disabled:opacity-50">Clear</button>
+                        </div>
+                        {brush !== "off" && <Slider label="Brush size" value={brushSize} min={5} max={100} onChange={setBrushSize} />}
+                        <p className="text-[11px] text-muted-foreground mt-1.5">
+                          {brush === "off"
+                            ? "Paint over anything the automatic pass got wrong."
+                            : brush === "keep"
+                              ? "Painting protects those pixels from removal."
+                              : "Painting forces those pixels to be removed."}
+                        </p>
+                      </Field>
+
+                      <Field label="Put a colour behind it">
+                        <div className="grid grid-cols-4 gap-1.5">
+                          {["#ffffff", "#f1f5f9", "#0f172a", "#0ea5b7"].map((c) => (
+                            <button key={c} onClick={() => runCutout(c)} disabled={busy} className="h-8 rounded-md border disabled:opacity-60" style={{ background: c }} title="Put this colour behind the subject" />
+                          ))}
+                        </div>
+                        <div className="flex items-center gap-2 mt-2">
+                          <input type="color" value={bgFill || "#ffffff"} onChange={(e) => setBgFill(e.target.value)} className="h-8 w-10 border rounded" />
+                          <button onClick={() => runCutout(bgFill || "#ffffff")} disabled={busy} className="flex-1 text-xs py-1.5 rounded-md border hover:bg-muted disabled:opacity-60">Use this colour</button>
+                        </div>
+                      </Field>
+
+                      <div className="flex gap-1.5 border-t pt-3">
+                        <button onClick={discardCutout} className="flex-1 text-xs py-2 rounded-md border hover:bg-muted">Discard</button>
+                        <button onClick={commitCutout} className="flex-1 text-xs py-2 rounded-md bg-primary text-primary-foreground font-semibold inline-flex items-center justify-center gap-1.5">
+                          <Check className="h-3.5 w-3.5" /> Apply
+                        </button>
+                      </div>
+                    </>
+                  )}
+
                   <div className="border-t pt-3">
                     <p className="text-xs font-semibold mb-1.5 inline-flex items-center gap-1.5"><Sparkles className="h-3.5 w-3.5 text-primary" /> AI edit</p>
                     {aiOn ? (
                       <>
-                        <p className="text-[11px] text-muted-foreground mb-2">Describe the change in plain English &mdash; background, lighting, cleanup, anything.</p>
+                        <p className="text-[11px] text-muted-foreground mb-2">For the cases the automatic pass can't win: hair, glass, a busy backdrop.</p>
                         <div className="grid grid-cols-1 gap-1.5">
                           {[
                             ["Remove the background completely and leave the subject on a transparent background", "Cut out subject (AI)"],
                             ["Replace the background with a clean seamless white studio backdrop", "White studio backdrop"],
                             ["Improve the lighting and colour so this looks like a professional product photo", "Pro product lighting"],
                           ].map(([instr, label]) => (
-                            <button key={label} onClick={() => runAiEdit(instr)} disabled={aiBusy} className="text-xs py-1.5 rounded-md border hover:bg-muted disabled:opacity-60">{aiBusy ? "Generating\u2026" : label}</button>
+                            <button key={label} onClick={() => runAiEdit(instr)} disabled={aiBusy} className="text-xs py-1.5 rounded-md border hover:bg-muted disabled:opacity-60">{aiBusy ? "Generating…" : label}</button>
                           ))}
                         </div>
                         <input
-                          placeholder="Custom instruction, then press Enter\u2026"
+                          placeholder="Custom instruction, then press Enter…"
                           disabled={aiBusy}
                           onKeyDown={(e) => { if (e.key === "Enter") { const el = e.target as HTMLInputElement; runAiEdit(el.value); el.value = ""; } }}
                           className="w-full border rounded-md px-2 py-1.5 text-xs mt-2"
                         />
                       </>
                     ) : (
-                      <p className="text-[11px] text-muted-foreground">Add a Gemini or OpenAI image key in <strong>Settings &rarr; AI</strong> to enable AI background replacement and retouching.</p>
+                      <p className="text-[11px] text-muted-foreground">Add a Gemini or OpenAI image key in <strong>Settings &rarr; AI</strong> to enable AI background replacement.</p>
                     )}
                   </div>
+
                   {history.current.length > 0 && (
-                    <button onClick={undoWork} className="w-full text-xs py-2 rounded-md border hover:bg-muted inline-flex items-center justify-center gap-1.5"><Undo2 className="h-3.5 w-3.5" /> Undo last cut-out / AI edit</button>
+                    <button onClick={undoWork} className="w-full text-xs py-2 rounded-md border hover:bg-muted inline-flex items-center justify-center gap-1.5"><Undo2 className="h-3.5 w-3.5" /> Undo last applied edit</button>
                   )}
                 </>
               )}
@@ -650,50 +941,172 @@ export function ImageEditor({
                   <Field label="Output size">
                     <div className="flex items-center gap-2">
                       <input type="number" value={outW} onChange={(e) => setW(Number(e.target.value))} className="w-full border rounded-md px-2 py-1.5 text-sm" />
-                      <span className="text-muted-foreground text-xs">×</span>
+                      <span className="text-muted-foreground text-xs">&times;</span>
                       <input type="number" value={outH} onChange={(e) => setH(Number(e.target.value))} className="w-full border rounded-md px-2 py-1.5 text-sm" />
                     </div>
                     <label className="flex items-center gap-2 text-xs mt-2">
                       <input type="checkbox" checked={lockRatio} onChange={(e) => setLockRatio(e.target.checked)} /> Lock aspect ratio
                     </label>
-                  </Field>
-                  <Field label="Quick sizes">
-                    <div className="grid grid-cols-3 gap-1.5">
-                      {[256, 512, 800, 1200, 1600, 2000].map((w) => (
+                    <div className="grid grid-cols-3 gap-1.5 mt-2">
+                      {[512, 800, 1200, 1600, 2000, 2400].map((w) => (
                         <button key={w} onClick={() => setW(w)} className="text-xs py-1.5 rounded-md border hover:bg-muted">{w}px</button>
                       ))}
                     </div>
                   </Field>
+
                   <Field label="Format">
                     <div className="grid grid-cols-3 gap-1.5">
                       {([["image/webp", "WebP"], ["image/jpeg", "JPEG"], ["image/png", "PNG"]] as const).map(([f, l]) => (
                         <button key={f} onClick={() => setFormat(f)} className={`text-xs py-1.5 rounded-md border ${format === f ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted"}`}>{l}</button>
                       ))}
                     </div>
-                    <p className="text-[11px] text-muted-foreground mt-1.5">WebP gives the smallest file at the same quality. Use PNG only when you need transparency.</p>
+                    <p className="text-[11px] text-muted-foreground mt-1.5">
+                      {format === "image/jpeg"
+                        ? "No transparency — a cut-out will come back on a black background."
+                        : format === "image/png"
+                          ? "Lossless, keeps transparency. Large unless you reduce the colours below."
+                          : "Smallest at the same quality, and keeps transparency. The right default."}
+                    </p>
                   </Field>
-                  {format !== "image/png" && (
-                    <>
-                      <Slider label="Quality" value={Math.round(quality * 100)} min={40} max={100} onChange={(v) => setQuality(v / 100)} unit="%" />
-                      <div className="grid grid-cols-3 gap-1.5">
-                        {([[0.95, "Max"], [0.82, "Balanced"], [0.65, "Small"]] as const).map(([q, l]) => (
-                          <button key={l} onClick={() => setQuality(q)} className={`text-xs py-1.5 rounded-md border ${Math.abs(quality - q) < 0.01 ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted"}`}>{l}</button>
+
+                  <Field label="How to compress">
+                    <div className="grid grid-cols-1 gap-1.5">
+                      {([
+                        ["quality", "Set the quality myself", "You choose the number."],
+                        ["target-quality", "Best quality per file size", "Finds the smallest file that still looks right."],
+                        ["target-size", "Hit a file size", "Highest quality that fits your budget."],
+                      ] as const).map(([k, label, hint]) => (
+                        <button key={k} onClick={() => setStrategy(k)} className={`text-left text-xs px-2.5 py-2 rounded-md border ${strategy === k ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted"}`}>
+                          <span className="font-semibold block">{label}</span>
+                          <span className={`block text-[10px] ${strategy === k ? "opacity-80" : "text-muted-foreground"}`}>{hint}</span>
+                        </button>
+                      ))}
+                    </div>
+                  </Field>
+
+                  {format !== "image/png" && strategy === "quality" && (
+                    <Slider label="Quality" value={Math.round(quality * 100)} min={30} max={98} onChange={(v) => setQuality(v / 100)} unit="%" />
+                  )}
+
+                  {strategy === "target-size" && (
+                    <Field label="Target file size">
+                      <div className="flex items-center gap-2">
+                        <input type="number" min={10} max={5000} value={targetKb} onChange={(e) => setTargetKb(Number(e.target.value) || 200)} className="w-full border rounded-md px-2 py-1.5 text-sm" />
+                        <span className="text-sm text-muted-foreground">KB</span>
+                      </div>
+                      <div className="grid grid-cols-4 gap-1.5 mt-1.5">
+                        {[100, 200, 500, 1000].map((k) => (
+                          <button key={k} onClick={() => setTargetKb(k)} className="text-xs py-1.5 rounded-md border hover:bg-muted">{k >= 1000 ? "1 MB" : `${k}K`}</button>
                         ))}
                       </div>
-                    </>
+                    </Field>
                   )}
-                  <div className="rounded-lg border bg-muted/40 p-3 text-xs space-y-1">
-                    <div className="flex items-center justify-between">
-                      <span className="text-muted-foreground">Estimated file size</span>
-                      <strong>{estimate || "\u2026"}</strong>
-                    </div>
-                    <p className="text-[11px] text-muted-foreground">
-                      Balanced WebP is usually 60&ndash;80% smaller than the original JPEG with no
-                      visible difference. Saved images are compressed again on the server.
-                    </p>
+
+                  {strategy === "target-quality" && (
+                    <Field label="How much loss is acceptable">
+                      <div className="grid grid-cols-3 gap-1.5">
+                        {([[0.995, "None"], [0.98, "Barely any"], [0.95, "Some"]] as const).map(([v, l]) => (
+                          <button key={l} onClick={() => setMinSsim(v)} className={`text-xs py-1.5 rounded-md border ${Math.abs(minSsim - v) < 0.001 ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted"}`}>{l}</button>
+                        ))}
+                      </div>
+                      <p className="text-[11px] text-muted-foreground mt-1.5">
+                        Each image is measured against the original, so a flat studio shot compresses much
+                        harder than a busy one — automatically.
+                      </p>
+                    </Field>
+                  )}
+
+                  {format === "image/png" && (
+                    <Field label="Reduce colours">
+                      <div className="grid grid-cols-4 gap-1.5">
+                        {[0, 256, 128, 64].map((n) => (
+                          <button key={n} onClick={() => setPngColors(n)} className={`text-xs py-1.5 rounded-md border ${pngColors === n ? "bg-primary text-primary-foreground border-primary" : "hover:bg-muted"}`}>{n === 0 ? "Full" : n}</button>
+                        ))}
+                      </div>
+                      {pngColors > 0 && (
+                        <label className="flex items-center gap-2 text-xs mt-2">
+                          <input type="checkbox" checked={pngDither} onChange={(e) => setPngDither(e.target.checked)} /> Dither (smoother gradients)
+                        </label>
+                      )}
+                      <p className="text-[11px] text-muted-foreground mt-1.5">
+                        PNG ignores a quality setting, so this is the only real lever — it usually halves
+                        the file, and does far better on a cut-out.
+                      </p>
+                    </Field>
+                  )}
+
+                  {/* Measured result */}
+                  <div className="rounded-lg border bg-muted/40 p-3 space-y-2">
+                    {encoding ? (
+                      <p className="text-xs text-muted-foreground inline-flex items-center gap-1.5"><RefreshCw className="h-3 w-3 animate-spin" /> {encoding}</p>
+                    ) : result ? (
+                      <>
+                        <div className="flex items-center justify-between text-sm">
+                          <span className="text-muted-foreground text-xs">File size</span>
+                          <strong>{prettyBytes(result.bytes)}</strong>
+                        </div>
+                        <div className="flex items-center justify-between text-xs">
+                          <span className="text-muted-foreground">Quality used</span>
+                          <span>{formatLabel(result.format)} {result.format !== "image/png" ? `${Math.round(result.quality * 100)}%` : ""}</span>
+                        </div>
+                        {(() => {
+                          const q = qualityLabel(result.ssim);
+                          const tone = q.tone === "good" ? "text-emerald-600" : q.tone === "ok" ? "text-amber-600" : "text-destructive";
+                          return (
+                            <div className="flex items-center gap-1.5 text-xs pt-1.5 border-t">
+                              <Gauge className={`h-3.5 w-3.5 ${tone}`} />
+                              <span className={tone}>{q.text}</span>
+                              <span className="text-muted-foreground ml-auto tabular-nums">{(result.ssim * 100).toFixed(1)}% match</span>
+                            </div>
+                          );
+                        })()}
+                      </>
+                    ) : (
+                      <p className="text-xs text-muted-foreground">Measuring…</p>
+                    )}
+                    <button onClick={runComparison} disabled={!!encoding} className="w-full text-xs py-1.5 rounded-md border bg-card hover:bg-muted disabled:opacity-60">
+                      Compare every format
+                    </button>
                   </div>
-                  <button onClick={download} disabled={!img} className="w-full inline-flex items-center justify-center gap-2 border text-sm font-semibold py-2 rounded-md hover:bg-muted disabled:opacity-60">
-                    <Download className="h-4 w-4" /> Download{estimate ? ` (${estimate})` : ""}
+
+                  {comparison && (
+                    <div className="rounded-lg border overflow-hidden">
+                      <table className="w-full text-[11px]">
+                        <thead className="bg-muted/60">
+                          <tr>
+                            <th className="text-left font-semibold px-2 py-1.5">Format</th>
+                            <th className="text-right font-semibold px-2 py-1.5">Size</th>
+                            <th className="text-right font-semibold px-2 py-1.5">Match</th>
+                            <th className="px-1" />
+                          </tr>
+                        </thead>
+                        <tbody>
+                          {comparison.map((r, i) => (
+                            <tr key={i} className="border-t">
+                              <td className="px-2 py-1.5">{formatLabel(r.format)}{r.format !== "image/png" && ` ${Math.round(r.quality * 100)}%`}</td>
+                              <td className="px-2 py-1.5 text-right tabular-nums">{prettyBytes(r.bytes)}</td>
+                              <td className={`px-2 py-1.5 text-right tabular-nums ${r.ssim >= 0.97 ? "text-emerald-600" : r.ssim >= 0.93 ? "text-amber-600" : "text-destructive"}`}>{(r.ssim * 100).toFixed(1)}%</td>
+                              <td className="px-1 py-1.5">
+                                <button
+                                  onClick={() => { setFormat(r.format); setQuality(r.quality); setStrategy("quality"); setComparison(null); setResult(r); }}
+                                  className="text-primary hover:underline"
+                                >
+                                  use
+                                </button>
+                              </td>
+                            </tr>
+                          ))}
+                        </tbody>
+                      </table>
+                      <p className="text-[10px] text-muted-foreground p-2 border-t">
+                        Smallest first. &ldquo;Match&rdquo; is how close the result is to the original, measured
+                        structurally rather than guessed.
+                      </p>
+                    </div>
+                  )}
+
+                  <button onClick={download} disabled={!img || !!encoding} className="w-full inline-flex items-center justify-center gap-2 border text-sm font-semibold py-2 rounded-md hover:bg-muted disabled:opacity-60">
+                    <Download className="h-4 w-4" /> Download{result ? ` (${prettyBytes(result.bytes)})` : ""}
                   </button>
                 </>
               )}
