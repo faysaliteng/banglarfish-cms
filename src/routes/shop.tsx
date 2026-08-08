@@ -1,5 +1,6 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
+import { useI18n } from "@/lib/i18n";
 import { ProductCard } from "@/components/site/ProductCard";
 import { listProducts, listCategories } from "@/lib/catalog.functions";
 import { formatBDT } from "@/lib/cart";
@@ -31,6 +32,7 @@ function Shop() {
   const { items, categories } = Route.useLoaderData();
   const { q, category } = Route.useSearch();
 
+  const { t } = useI18n();
   const priceBounds = useMemo(() => {
     const ps = items.map((p) => p.price);
     return { min: 0, max: Math.max(100, ...ps) };
@@ -73,7 +75,7 @@ function Shop() {
   if (selectedCat) activeChips.push({ label: categories.find((c) => c.slug === selectedCat)?.name ?? selectedCat, clear: () => setSelectedCat(null) });
   selectedBrands.forEach((b) => activeChips.push({ label: b, clear: () => setSelectedBrands((s) => s.filter((x) => x !== b)) }));
   if (minRating) activeChips.push({ label: `${minRating}★ & up`, clear: () => setMinRating(0) });
-  if (inStock) activeChips.push({ label: "In stock", clear: () => setInStock(false) });
+  if (inStock) activeChips.push({ label: t("product.inStock"), clear: () => setInStock(false) });
   if (onSale) activeChips.push({ label: "On sale", clear: () => setOnSale(false) });
   if (minPrice > priceBounds.min || maxPrice < priceBounds.max) activeChips.push({ label: `${formatBDT(minPrice)}–${formatBDT(maxPrice)}`, clear: () => { setMinPrice(priceBounds.min); setMaxPrice(priceBounds.max); } });
 
@@ -124,7 +126,7 @@ function Shop() {
         </ul>
       </FilterGroup>
       <FilterGroup title="Availability">
-        <label className="flex items-center gap-2 text-sm cursor-pointer mb-1.5"><input type="checkbox" checked={inStock} onChange={(e) => { setInStock(e.target.checked); setPage(1); }} /> In stock only</label>
+        <label className="flex items-center gap-2 text-sm cursor-pointer mb-1.5"><input type="checkbox" checked={inStock} onChange={(e) => { setInStock(e.target.checked); setPage(1); }} /> {t("product.inStock")}</label>
         <label className="flex items-center gap-2 text-sm cursor-pointer"><input type="checkbox" checked={onSale} onChange={(e) => { setOnSale(e.target.checked); setPage(1); }} /> On sale</label>
       </FilterGroup>
     </div>
@@ -171,7 +173,7 @@ function Shop() {
                 {shown.map((p: Product) => <ProductCard key={p.id} product={p} />)}
               </div>
               {shown.length < filtered.length && (
-                <div className="text-center mt-8"><button onClick={() => setPage((p) => p + 1)} className="border rounded-full px-6 py-2.5 text-sm font-semibold hover:bg-muted">Load more ({filtered.length - shown.length} left)</button></div>
+                <div className="text-center mt-8"><button onClick={() => setPage((p) => p + 1)} className="border rounded-full px-6 py-2.5 text-sm font-semibold hover:bg-muted">{t("action.loadMore")} ({filtered.length - shown.length})</button></div>
               )}
             </>
           )}

@@ -1,3 +1,5 @@
+import { renderTitle } from "@/lib/seo-title";
+import { getSeo } from "@/lib/site.functions";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { getPage } from "@/lib/catalog.functions";
@@ -8,7 +10,8 @@ export const Route = createFileRoute("/pages/$slug")({
     const page = await getPage({ data: { slug: params.slug } });
     if (!page) throw notFound();
     const siteUrl = typeof process !== "undefined" ? (process.env.APP_URL || "").replace(/\/+$/, "") : "";
-    return { page, siteUrl };
+    const seo = await getSeo().catch(() => null);
+    return { page, siteUrl, seo };
   },
   head: ({ loaderData }) => {
     const p = loaderData?.page;
@@ -16,7 +19,7 @@ export const Route = createFileRoute("/pages/$slug")({
     const canonical = (loaderData?.siteUrl || "") ? `${loaderData.siteUrl}/pages/${p.slug}` : `/pages/${p.slug}`;
     return {
       meta: [
-        { title: `${p.metaTitle || p.title} — Banglarfish` },
+        { title: renderTitle(loaderData?.seo?.titleTemplate, p.metaTitle || p.title, loaderData?.seo?.siteName || "Banglarfish") },
         { name: "description", content: p.metaDescription || "" },
         ...(p.noindex ? [{ name: "robots", content: "noindex" }] : []),
         { property: "og:title", content: p.metaTitle || p.title },

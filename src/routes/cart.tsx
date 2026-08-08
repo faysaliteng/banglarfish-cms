@@ -1,6 +1,7 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { useCart, cart, cartTotals, formatBDT } from "@/lib/cart";
+import { useI18n } from "@/lib/i18n";
 import { Minus, Plus, X, ShoppingBag } from "lucide-react";
 
 export const Route = createFileRoute("/cart")({
@@ -11,13 +12,14 @@ export const Route = createFileRoute("/cart")({
 function CartPage() {
   const { lines } = useCart();
   const totals = cartTotals(lines);
+  const { t } = useI18n();
 
   if (lines.length === 0) {
     return (
       <SiteLayout>
         <div className="container-x py-20 text-center">
           <ShoppingBag className="h-14 w-14 mx-auto text-muted-foreground/50" />
-          <h1 className="text-2xl font-bold mt-4">Your cart is empty</h1>
+          <h1 className="text-2xl font-bold mt-4">{t("cart.empty")}</h1>
           <p className="text-muted-foreground mt-2">Start shopping for the freshest catch.</p>
           <Link to="/shop" className="inline-block mt-6 bg-primary text-primary-foreground px-6 py-3 rounded-full font-semibold">Browse shop</Link>
         </div>
@@ -28,7 +30,7 @@ function CartPage() {
   return (
     <SiteLayout>
       <div className="container-x py-8">
-        <h1 className="text-3xl font-bold mb-6">Your Cart</h1>
+        <h1 className="text-3xl font-bold mb-6">{t("cart.title")}</h1>
         <div className="grid lg:grid-cols-[1fr_360px] gap-8">
           <div className="border rounded-xl divide-y">
             {lines.map((l) => (
@@ -52,17 +54,17 @@ function CartPage() {
           <aside className="border rounded-xl p-6 h-fit bg-muted/30">
             <h3 className="font-semibold text-lg mb-4">Order Summary</h3>
             <dl className="space-y-2 text-sm">
-              <Row k="Subtotal" v={formatBDT(totals.subtotal)} />
-              <Row k="Shipping" v={totals.shipping === 0 ? "FREE" : formatBDT(totals.shipping)} />
+              <Row k={t("cart.subtotal")} v={formatBDT(totals.subtotal)} />
+              <Row k={t("cart.shipping")} v={totals.shipping === 0 ? t("cart.free") : formatBDT(totals.shipping)} />
               {totals.tax > 0 && <Row k="Tax" v={formatBDT(totals.tax)} />}
             </dl>
             <div className="border-t my-4" />
             <div className="flex justify-between text-lg font-bold">
-              <span>Total</span>
+              <span>{t("cart.total")}</span>
               <span className="text-[var(--color-brand)]">{formatBDT(totals.total)}</span>
             </div>
-            <Link to="/checkout" className="mt-6 block text-center bg-primary text-primary-foreground py-3 rounded-md font-semibold hover:bg-primary/90">Proceed to Checkout</Link>
-            <Link to="/shop" className="mt-2 block text-center text-sm text-primary hover:underline">Continue shopping</Link>
+            <Link to="/checkout" className="mt-6 block text-center bg-primary text-primary-foreground py-3 rounded-md font-semibold hover:bg-primary/90">{t("action.checkout")}</Link>
+            <Link to="/shop" className="mt-2 block text-center text-sm text-primary hover:underline">{t("action.continueShopping")}</Link>
           </aside>
         </div>
       </div>

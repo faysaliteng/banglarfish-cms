@@ -6,7 +6,8 @@ import { useServerFn } from "@tanstack/react-start";
 import { me } from "@/lib/auth.functions";
 import { getProfile } from "@/lib/account.functions";
 import { createOrder } from "@/lib/orders.functions";
-import { getEnabledPaymentMethods } from "@/lib/site.functions";
+import { getEnabledPaymentMethods, checkCoupon } from "@/lib/site.functions";
+import { checkGiftCard } from "@/lib/giftcards.functions";
 import { captureCheckout } from "@/lib/checkout.functions";
 import { withBase } from "@/lib/base-path";
 import { toast } from "sonner";
@@ -35,6 +36,10 @@ function Checkout() {
   const capture = useServerFn(captureCheckout);
   const payMethodsFn = useServerFn(getEnabledPaymentMethods);
   const [pay, setPay] = useState<{ cod: boolean; bkash: boolean; nagad: boolean; card: boolean } | null>(null);
+  const couponFn = useServerFn(checkCoupon);
+  const giftFn = useServerFn(checkGiftCard);
+  const [coupon, setCoupon] = useState({ code: "", discount: 0, msg: "", ok: false, busy: false });
+  const [gift, setGift] = useState({ code: "", balance: 0, msg: "", ok: false, busy: false });
 
   // Save an in-progress checkout for abandoned-cart recovery (fires when contact entered).
   function captureNow(e: React.FocusEvent<HTMLInputElement>) {
@@ -80,6 +85,26 @@ function Checkout() {
 
   if (checkingAuth) {
     return <SiteLayout><div className="container-x py-20 text-center text-sm text-muted-foreground">Loading…</div></SiteLayout>;
+  }
+
+  // Validate codes as they are entered so an invalid one can't silently no-op.
+  async function validateCoupon(code: string) {
+    const c = code.trim();
+    if (!c) { setCoupon({ code: "", discount: 0, msg: "", ok: false, busy: false }); return; }
+    setCoupon((p) => ({ ...p, busy: true }));
+    try {
+      const r = await couponFn({ data: { code: c, subtotal: totals.subtotal } });
+      setCoupon({ code: c, discount: r.discount, msg: r.reason, ok: r.valid, busy: false });
+    } catch { setCoupon({ code: c, discount: 0, msg: "Could not check that code.", ok: false, busy: false }); }
+  }
+  async function validateGift(code: string) {
+    const c = code.trim();
+    if (!c) { setGift({ code: "", balance: 0, msg: "", ok: false, busy: false }); return; }
+    setGift((p) => ({ ...p, busy: true }));
+    try {
+      const r = await giftFn({ data: { code: c } });
+      setGift({ code: c, balance: r.balance, msg: r.valid ? `Balance ${formatBDT(r.balance)} will be applied` : "That gift card isn't valid.", ok: r.valid, busy: false });
+    } catch { setGift({ code: c, balance: 0, msg: "Could not check that card.", ok: false, busy: false }); }
   }
 
   async function place(e: React.FormEvent<HTMLFormElement>) {
@@ -168,15 +193,25 @@ function Checkout() {
               ))}
             </ul>
             <div className="mt-4 space-y-2">
-              <input name="coupon" placeholder="Coupon code (optional)" className="w-full border rounded-md px-3 py-2 text-sm uppercase" />
-              <input name="gift_card" placeholder="Gift card code (optional)" className="w-full border rounded-md px-3 py-2 text-sm uppercase" />
-              <p className="text-[11px] text-muted-foreground">Coupons &amp; gift cards are validated and applied when you place the order.</p>
+              <div>
+                <input name="coupon" placeholder="Coupon code (optional)" onBlur={(e) => validateCoupon(e.target.value)} className={`w-full border rounded-md px-3 py-2 text-sm uppercase ${coupon.code && !coupon.busy ? (coupon.ok ? "border-emerald-400" : "border-amber-400") : ""}`} />
+                {coupon.busy ? <p className="text-[11px] text-muted-foreground mt-1">Checking…</p>
+                  : coupon.msg && <p className={`text-[11px] mt-1 ${coupon.ok ? "text-emerald-600" : "text-amber-600"}`}>{coupon.ok ? `✓ ${coupon.msg} (−${formatBDT(coupon.discount)})` : coupon.msg}</p>}
+              </div>
+              <div>
+                <input name="gift_card" placeholder="Gift card code (optional)" onBlur={(e) => validateGift(e.target.value)} className={`w-full border rounded-md px-3 py-2 text-sm uppercase ${gift.code && !gift.busy ? (gift.ok ? "border-emerald-400" : "border-amber-400") : ""}`} />
+                {gift.busy ? <p className="text-[11px] text-muted-foreground mt-1">Checking…</p>
+                  : gift.msg && <p className={`text-[11px] mt-1 ${gift.ok ? "text-emerald-600" : "text-amber-600"}`}>{gift.ok ? `✓ ${gift.msg}` : gift.msg}</p>}
+              </div>
+              <p className="text-[11px] text-muted-foreground">Final amounts are confirmed by us when the order is placed.</p>
             </div>
             <div className="border-t mt-4 pt-4 space-y-1.5 text-sm">
               <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{formatBDT(totals.subtotal)}</span></div>
               <div className="flex justify-between"><span className="text-muted-foreground">Shipping</span><span>{totals.shipping === 0 ? "FREE" : formatBDT(totals.shipping)}</span></div>
               {totals.tax > 0 && <div className="flex justify-between"><span className="text-muted-foreground">Tax</span><span>{formatBDT(totals.tax)}</span></div>}
-              <div className="flex justify-between text-lg font-bold pt-2"><span>Total</span><span className="text-[var(--color-brand)]">{formatBDT(totals.total)}</span></div>
+              {coupon.ok && coupon.discount > 0 && <div className="flex justify-between text-emerald-600"><span>Coupon discount</span><span>−{formatBDT(coupon.discount)}</span></div>}
+              {gift.ok && gift.balance > 0 && <div className="flex justify-between text-emerald-600"><span>Gift card</span><span>−{formatBDT(Math.min(gift.balance, Math.max(0, totals.total - coupon.discount)))}</span></div>}
+              <div className="flex justify-between text-lg font-bold pt-2"><span>Total</span><span className="text-[var(--color-brand)]">{formatBDT(Math.max(0, totals.total - (coupon.ok ? coupon.discount : 0) - (gift.ok ? Math.min(gift.balance, Math.max(0, totals.total - (coupon.ok ? coupon.discount : 0))) : 0)))}</span></div>
             </div>
             <button disabled={placing} className="w-full mt-5 bg-primary text-primary-foreground py-3 rounded-md font-semibold hover:bg-primary/90 disabled:opacity-60">
               {placing ? "Placing order..." : "Place Order"}

@@ -1,3 +1,5 @@
+import { renderTitle } from "@/lib/seo-title";
+import { getSeo } from "@/lib/site.functions";
 import { createFileRoute, notFound, Link } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { ProductCard } from "@/components/site/ProductCard";
@@ -7,6 +9,7 @@ import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { submitReview } from "@/lib/catalog.functions";
 import { toast } from "sonner";
+import { useI18n } from "@/lib/i18n";
 import { Star, ShoppingBag, Truck, ShieldCheck, Snowflake, Minus, Plus } from "lucide-react";
 import type { Variant } from "@/lib/types";
 import { sanitizeHtml } from "@/lib/sanitize-html";
@@ -24,7 +27,8 @@ export const Route = createFileRoute("/product/$slug")({
     const data = await getProductBySlug({ data: { slug: params.slug } });
     if (!data) throw notFound();
     const siteUrl = typeof process !== "undefined" ? (process.env.APP_URL || "").replace(/\/+$/, "") : "";
-    return { ...data, siteUrl };
+    const seo = await getSeo().catch(() => null);
+    return { ...data, siteUrl, seo };
   },
   head: ({ loaderData }) => {
     if (!loaderData) return { meta: [{ title: "Product not found" }, { name: "robots", content: "noindex" }] };
@@ -33,7 +37,8 @@ export const Route = createFileRoute("/product/$slug")({
     const canonical = base ? `${base}/product/${p.slug}` : `/product/${p.slug}`;
     const ogImage = p.image ? (/^https?:\/\//i.test(p.image) ? p.image : base + p.image) : undefined;
     const desc = stripHtml(p.description).slice(0, 155);
-    const title = `${p.metaTitle || p.name} — Banglarfish`;
+    const seo = loaderData.seo;
+    const title = renderTitle(seo?.productTitleTemplate || seo?.titleTemplate, p.metaTitle || p.name, seo?.siteName || "Banglarfish");
     return {
       meta: [
         { title },
@@ -61,6 +66,7 @@ function ProductPage() {
   const [variant, setVariant] = useState<Variant | null>(product.variants[1] ?? product.variants[0] ?? null);
   const [weightLabel, setWeightLabel] = useState(product.weightOptions[1] ?? product.weightOptions[0] ?? "");
   const [qty, setQty] = useState(1);
+  const { t } = useI18n();
   const [tab, setTab] = useState<"desc" | "shipping" | "reviews">("desc");
   const [added, setAdded] = useState(false);
 
@@ -156,9 +162,9 @@ function ProductPage() {
 
       <div className="container-x pb-14">
         <div className="border-b flex gap-6 text-sm font-semibold overflow-x-auto whitespace-nowrap">
-          {(["desc", "shipping", "reviews"] as const).map((t) => (
-            <button key={t} onClick={() => setTab(t)} className={`py-3 border-b-2 -mb-px ${tab === t ? "border-primary text-primary" : "border-transparent text-muted-foreground"}`}>
-              {t === "desc" ? "Description" : t === "shipping" ? "Shipping" : `Reviews (${reviews.length})`}
+          {(["desc", "shipping", "reviews"] as const).map((tb) => (
+            <button key={tb} onClick={() => setTab(tb)} className={`py-3 border-b-2 -mb-px ${tab === tb ? "border-primary text-primary" : "border-transparent text-muted-foreground"}`}>
+              {tb === "desc" ? t("product.description") : tb === "shipping" ? t("product.shipping") : `${t("product.reviews")} (${reviews.length})`}
             </button>
           ))}
         </div>

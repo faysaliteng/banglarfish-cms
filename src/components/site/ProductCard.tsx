@@ -4,12 +4,14 @@ import { useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { toggleWishlist } from "@/lib/account.functions";
 import { toast } from "sonner";
+import { useI18n } from "@/lib/i18n";
 import type { Product } from "@/lib/types";
 import { cart, formatBDT } from "@/lib/cart";
 import { Img } from "./Img";
 
 export function ProductCard({ product }: { product: Product }) {
   const nav = useNavigate();
+  const { t } = useI18n();
   const wishFn = useServerFn(toggleWishlist);
   const [wished, setWished] = useState(false);
   const [saving, setSaving] = useState(false);
@@ -82,7 +84,7 @@ export function ProductCard({ product }: { product: Product }) {
           }}
           className="mt-3 inline-flex items-center justify-center gap-2 rounded-md bg-primary text-primary-foreground text-sm font-medium py-2 hover:bg-primary/90 transition"
         >
-          <ShoppingBag className="h-4 w-4" /> Add to Cart
+          <ShoppingBag className="h-4 w-4" /> {t("action.addToCart")}
         </button>
       </div>
     </div>

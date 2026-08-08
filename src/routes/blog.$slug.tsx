@@ -1,3 +1,5 @@
+import { renderTitle } from "@/lib/seo-title";
+import { getSeo } from "@/lib/site.functions";
 import { createFileRoute, notFound, Link } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { getBlogPost, getSiteSections } from "@/lib/catalog.functions";
@@ -10,7 +12,8 @@ export const Route = createFileRoute("/blog/$slug")({
     if (!post) throw notFound();
     const sections = await getSiteSections();
     const siteUrl = typeof process !== "undefined" ? (process.env.APP_URL || "").replace(/\/+$/, "") : "";
-    return { post, commentsEnabled: sections.comments !== false, siteUrl };
+    const seo = await getSeo().catch(() => null);
+    return { post, commentsEnabled: sections.comments !== false, siteUrl, seo };
   },
   head: ({ loaderData }) => {
     const p = loaderData?.post;
@@ -19,7 +22,8 @@ export const Route = createFileRoute("/blog/$slug")({
     const canonical = base ? `${base}/blog/${p.slug}` : `/blog/${p.slug}`;
     const img = p.ogImage || p.coverImage;
     const ogImage = img ? (/^https?:\/\//i.test(img) ? img : base + img) : undefined;
-    const title = `${p.metaTitle || p.title} — Banglarfish`;
+    const seo = loaderData?.seo;
+    const title = renderTitle(seo?.postTitleTemplate || seo?.titleTemplate, p.metaTitle || p.title, seo?.siteName || "Banglarfish");
     const desc = p.metaDescription || p.excerpt;
     return {
       meta: [

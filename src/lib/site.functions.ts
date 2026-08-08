@@ -494,3 +494,22 @@ export const getEnabledPaymentMethods = createServerFn({ method: "GET" }).handle
     return { cod: true, bkash: false, nagad: false, card: false };
   }
 });
+
+/* ---------------- Coupon preview (checkout feedback) ---------------- */
+// Public: validate a coupon and return the discount it would give for a
+// subtotal, so checkout can show the effect before the order is placed.
+// createOrder re-validates and recomputes authoritatively.
+export const checkCoupon = createServerFn({ method: "GET" })
+  .inputValidator((i: unknown) => z.object({ code: z.string().trim().min(1).max(40), subtotal: z.number().int().min(0) }).parse(i))
+  .handler(async ({ data }): Promise<{ valid: boolean; discount: number; reason: string }> => {
+    const { db } = await import("@/server/db");
+    const { coupons } = await import("@/server/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const [c] = await db.select().from(coupons).where(eq(coupons.code, data.code.trim().toUpperCase())).limit(1);
+    if (!c || !c.active) return { valid: false, discount: 0, reason: "That coupon code isn't valid." };
+    if (c.expiresAt && c.expiresAt.getTime() <= Date.now()) return { valid: false, discount: 0, reason: "That coupon has expired." };
+    if (c.usageLimit > 0 && c.usage >= c.usageLimit) return { valid: false, discount: 0, reason: "That coupon has already been used." };
+    if (data.subtotal < c.minSubtotal) return { valid: false, discount: 0, reason: `Spend at least ৳${c.minSubtotal.toLocaleString()} to use this coupon.` };
+    const discount = c.type === "percent" ? Math.round((data.subtotal * c.value) / 100) : Math.min(c.value, data.subtotal);
+    return { valid: true, discount, reason: c.type === "percent" ? `${c.value}% off applied` : "Discount applied" };
+  });

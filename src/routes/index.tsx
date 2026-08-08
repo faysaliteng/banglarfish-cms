@@ -7,6 +7,8 @@ import { getTheme } from "@/lib/theme.functions";
 import { Truck, ShieldCheck, Snowflake, Clock, ArrowRight, ShoppingBag, PackageCheck, Bike, ChefHat } from "lucide-react";
 import { toast } from "sonner";
 import { Reveal } from "@/components/site/Reveal";
+import { useI18n } from "@/lib/i18n";
+import { Banners } from "@/components/site/Banners";
 import { CountUp } from "@/components/site/CountUp";
 import type { Homepage, ThemeHero, Product, BlogPost } from "@/lib/types";
 
@@ -43,6 +45,7 @@ function Home() {
   const { h, categories, best, arrivals, hero, recipes, blog, masala } = Route.useLoaderData();
   const s = h.sections;
   const subscribe = useServerFn(subscribeNewsletter);
+  const { t } = useI18n();
 
   async function onSubscribe(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -59,8 +62,14 @@ function Home() {
 
   return (
     <SiteLayout>
+      {/* Admin -> Banners (strip placement) */}
+      <Banners placement="strip" />
+
       {/* Hero (layout switches with the admin Theme setting) */}
       <Hero h={h} hero={hero} />
+
+      {/* Admin -> Banners (hero placement) */}
+      <Banners placement="hero" className="mt-8" />
 
       {/* Trust bar */}
       <section className="border-y bg-muted/40">
@@ -106,7 +115,7 @@ function Home() {
       {/* Best Sellers */}
       {s.bestSellers && best.length > 0 && (
         <section className="container-x py-8">
-          <SectionHead eyebrow={h.bestSellersEyebrow} title={h.bestSellersTitle} cta={{ href: "/shop", label: "View all" }} />
+          <SectionHead eyebrow={h.bestSellersEyebrow} title={h.bestSellersTitle} cta={{ href: "/shop", label: t("action.viewAll") }} />
           <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
             {best.slice(0, 8).map((p, i) => <Reveal key={p.id} delay={(i % 4) * 70}><ProductCard product={p} /></Reveal>)}
           </div>
@@ -128,6 +137,9 @@ function Home() {
         ))}
       </section>
       )}
+
+      {/* Admin -> Banners (promo placement) */}
+      <Banners placement="promo" className="py-6" />
 
       {/* New Arrivals */}
       {s.newArrivals && arrivals.length > 0 && (

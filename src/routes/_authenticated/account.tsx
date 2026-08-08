@@ -6,13 +6,14 @@ import { useServerFn } from "@tanstack/react-start";
 import { getProfile, updateMyProfile, changeEmail, changePassword, listWishlist, toggleWishlist, listMySessions, revokeSession, revokeOtherSessions, type Profile, type SessionRow } from "@/lib/account.functions";
 import { requestPhoneVerify, confirmPhoneVerify } from "@/lib/auth.functions";
 import { listMyOrders } from "@/lib/orders.functions";
-import { submitReturn } from "@/lib/returns.functions";
+import { submitReturn, listMyReturns } from "@/lib/returns.functions";
+import type { ReturnRow } from "@/lib/returns.functions";
 import { exportMyData, deleteMyAccount } from "@/lib/privacy.functions";
 import { get2FAStatus, begin2FASetup, confirm2FASetup, disable2FA, type TwoFactorSetup } from "@/lib/twofactor.functions";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSession, useSignOut } from "@/lib/auth";
 import type { Product } from "@/lib/types";
-import { LayoutDashboard, ShoppingBag, Heart, User as UserIcon, ShieldCheck, LogOut, ShieldAlert, Package, ArrowRight, BadgeCheck, Download, Trash2 } from "lucide-react";
+import { LayoutDashboard, ShoppingBag, Heart, User as UserIcon, ShieldCheck, LogOut, ShieldAlert, Package, ArrowRight, BadgeCheck, Download, Trash2, RotateCcw } from "lucide-react";
 import { toast } from "sonner";
 
 const fmt = (n: number) => `৳${n.toLocaleString("en-IN")}`;
@@ -32,10 +33,11 @@ type OrderRow = {
   created_at: string;
 };
 
-type Tab = "overview" | "orders" | "wishlist" | "profile" | "security";
+type Tab = "overview" | "orders" | "returns" | "wishlist" | "profile" | "security";
 const NAV: { id: Tab; label: string; icon: typeof LayoutDashboard }[] = [
   { id: "overview", label: "Overview", icon: LayoutDashboard },
   { id: "orders", label: "Orders", icon: ShoppingBag },
+  { id: "returns", label: "Returns", icon: RotateCcw },
   { id: "wishlist", label: "Wishlist", icon: Heart },
   { id: "profile", label: "Profile", icon: UserIcon },
   { id: "security", label: "Security", icon: ShieldCheck },
@@ -192,6 +194,8 @@ function AccountPage() {
               <Overview user={user} orders={orders} wishlistCount={wishlist.length} spent={spent} onGoTo={setTab} />
             ) : tab === "orders" ? (
               <OrdersTab orders={orders} />
+            ) : tab === "returns" ? (
+              <ReturnsTab />
             ) : tab === "wishlist" ? (
               <WishlistTab items={wishlist} onRemove={onRemoveWishlist} />
             ) : tab === "profile" ? (
@@ -689,5 +693,60 @@ function Field({ label, ...props }: { label: string } & React.InputHTMLAttribute
       <span className="block mb-1 text-muted-foreground text-xs font-medium">{label}</span>
       <input {...props} className="w-full border rounded-md px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30" />
     </label>
+  );
+}
+
+
+// Customers can now follow a return through to the merchant's decision — the
+// request used to disappear the moment it was submitted.
+const RETURN_STATUS: Record<string, { label: string; cls: string }> = {
+  requested: { label: "Requested", cls: "bg-amber-100 text-amber-800" },
+  approved: { label: "Approved", cls: "bg-emerald-100 text-emerald-700" },
+  rejected: { label: "Rejected", cls: "bg-rose-100 text-rose-700" },
+  refunded: { label: "Refunded", cls: "bg-sky-100 text-sky-700" },
+};
+
+function ReturnsTab() {
+  const fetchFn = useServerFn(listMyReturns);
+  const [rows, setRows] = useState<ReturnRow[] | null>(null);
+  useEffect(() => { fetchFn().then(setRows).catch(() => setRows([])); }, [fetchFn]);
+
+  if (rows === null) return (<div><SectionTitle title="Returns" /><p className="text-sm text-muted-foreground">Loading…</p></div>);
+  if (rows.length === 0) {
+    return (
+      <div>
+        <SectionTitle title="Returns" desc="Return and refund requests you've made." />
+        <div className="border rounded-2xl p-12 text-center bg-card">
+          <RotateCcw className="h-8 w-8 mx-auto text-muted-foreground mb-3" />
+          <p className="text-muted-foreground">No return requests yet. You can request one from any order on the Orders tab.</p>
+        </div>
+      </div>
+    );
+  }
+  return (
+    <div>
+      <SectionTitle title="Returns" desc={`${rows.length} request(s)`} />
+      <div className="space-y-3">
+        {rows.map((r) => {
+          const st = RETURN_STATUS[r.status] ?? { label: r.status, cls: "bg-muted text-muted-foreground" };
+          return (
+            <div key={r.id} className="border rounded-xl p-4 bg-card">
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="font-semibold">Order #{r.orderNumber}</span>
+                <span className={`text-[10px] font-bold px-2 py-1 rounded-full ${st.cls}`}>{st.label.toUpperCase()}</span>
+                <span className="ml-auto text-xs text-muted-foreground">{new Date(r.createdAt).toLocaleDateString()}</span>
+              </div>
+              <p className="text-sm mt-2"><span className="text-muted-foreground">Reason:</span> {r.reason}</p>
+              {r.items?.length > 0 && (
+                <p className="text-xs text-muted-foreground mt-1">{r.items.map((i) => `${i.qty}× ${i.name}`).join(", ")}</p>
+              )}
+              {r.adminNote && (
+                <p className="text-sm mt-2 rounded-lg bg-muted/60 px-3 py-2"><span className="font-medium">Our reply:</span> {r.adminNote}</p>
+              )}
+            </div>
+          );
+        })}
+      </div>
+    </div>
   );
 }

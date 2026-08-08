@@ -1,3 +1,5 @@
+import { renderTitle } from "@/lib/seo-title";
+import { getSeo } from "@/lib/site.functions";
 import { createFileRoute, notFound } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { ProductCard } from "@/components/site/ProductCard";
@@ -13,14 +15,15 @@ export const Route = createFileRoute("/category/$slug")({
     const cat = categories.find((c) => c.slug === params.slug);
     if (!cat) throw notFound();
     const siteUrl = typeof process !== "undefined" ? (process.env.APP_URL || "").replace(/\/+$/, "") : "";
-    return { cat, items, siteUrl };
+    const seo = await getSeo().catch(() => null);
+    return { cat, items, siteUrl, seo };
   },
   head: ({ loaderData }) => {
     if (!loaderData) return { meta: [{ title: "Category not found" }, { name: "robots", content: "noindex" }] };
     const canonical = (loaderData.siteUrl || "") ? `${loaderData.siteUrl}/category/${loaderData.cat.slug}` : `/category/${loaderData.cat.slug}`;
     return {
       meta: [
-        { title: `${loaderData.cat.name} — Banglarfish` },
+        { title: renderTitle(loaderData.seo?.categoryTitleTemplate || loaderData.seo?.titleTemplate, loaderData.cat.name, loaderData.seo?.siteName || "Banglarfish") },
         { name: "description", content: `Fresh ${loaderData.cat.name} delivered to your door. Cleaned, iced, and dispatched same day.` },
         { property: "og:title", content: `${loaderData.cat.name} — Banglarfish` },
         { property: "og:url", content: canonical },
