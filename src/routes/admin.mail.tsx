@@ -2,7 +2,7 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
-import { adminListMail, adminGetMail, adminSendMail, adminDeleteMail, adminListRecipients, adminMailUpload, adminSaveDraft } from "@/lib/mail.functions";
+import { adminListMail, adminGetMail, adminSendMail, adminDeleteMail, adminListRecipients, adminMailUpload, adminSaveDraft, adminDeleteMails, adminEmptyMailFolder } from "@/lib/mail.functions";
 import { RichTextEditor } from "@/components/admin/RichTextEditor";
 import type { EmailMessage } from "@/lib/config-types";
 import { Inbox, Send, FileText, PenSquare, Paperclip, Reply, Forward, Trash2, X, RefreshCw, Mail as MailIcon, AlertCircle } from "lucide-react";
@@ -24,11 +24,14 @@ function MailPage() {
   const [folder, setFolder] = useState<Folder>("sent");
   const [openId, setOpenId] = useState<string | null>(null);
   const [compose, setCompose] = useState<Draft | null>(null);
+  const [selected, setSelected] = useState<Set<string>>(new Set());
 
   const listFn = useServerFn(adminListMail);
   const getFn = useServerFn(adminGetMail);
   const delFn = useServerFn(adminDeleteMail);
   const recipFn = useServerFn(adminListRecipients);
+  const delManyFn = useServerFn(adminDeleteMails);
+  const emptyFn = useServerFn(adminEmptyMailFolder);
 
   const { data, isFetching, refetch } = useQuery({
     queryKey: ["admin-mail", folder],
@@ -45,6 +48,30 @@ function MailPage() {
     onSuccess: () => { toast.success("Deleted"); setOpenId(null); qc.invalidateQueries({ queryKey: ["admin-mail"] }); },
     onError: (e) => toast.error(e instanceof Error ? e.message : "Delete failed"),
   });
+
+  function toggleSel(id: string) {
+    setSelected((prev) => { const n = new Set(prev); if (n.has(id)) n.delete(id); else n.add(id); return n; });
+  }
+  async function deleteSelected() {
+    const ids = [...selected];
+    if (!ids.length) return;
+    if (!confirm(`Delete ${ids.length} message(s)? This cannot be undone.`)) return;
+    try {
+      const r = await delManyFn({ data: { ids } });
+      toast.success(`Deleted ${r.deleted} message(s)`);
+      setSelected(new Set()); setOpenId(null);
+      qc.invalidateQueries({ queryKey: ["admin-mail"] });
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Delete failed"); }
+  }
+  async function emptyFolder() {
+    if (!confirm(`Delete ALL messages in ${folder}? This cannot be undone.`)) return;
+    try {
+      const r = await emptyFn({ data: { folder } });
+      toast.success(`Deleted ${r.deleted} message(s)`);
+      setSelected(new Set()); setOpenId(null);
+      qc.invalidateQueries({ queryKey: ["admin-mail"] });
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Could not empty folder"); }
+  }
 
   function startCompose(patch: Partial<Draft> = {}) { setCompose({ ...emptyDraft, ...patch }); }
   function reply(m: EmailMessage) {
@@ -68,7 +95,17 @@ function MailPage() {
     <div className="pb-10">
       <div className="flex items-center justify-between gap-3 mb-4">
         <h1 className="text-xl sm:text-2xl font-bold flex items-center gap-2"><MailIcon className="h-6 w-6" /> Email</h1>
-        <button onClick={() => refetch()} className="text-sm inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border hover:bg-muted"><RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} /> Refresh</button>
+        <div className="flex items-center gap-2">
+          {selected.size > 0 && (
+            <button onClick={deleteSelected} className="text-sm inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border border-destructive/40 text-destructive hover:bg-destructive/10">
+              <Trash2 className="h-4 w-4" /> Delete {selected.size} selected
+            </button>
+          )}
+          {messages.length > 0 && !open && (
+            <button onClick={emptyFolder} className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted" title={`Delete every message in ${folder}`}>Empty {folder}</button>
+          )}
+          <button onClick={() => refetch()} className="text-sm inline-flex items-center gap-1.5 px-3 py-1.5 rounded-md border hover:bg-muted"><RefreshCw className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`} /> Refresh</button>
+        </div>
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-[200px_1fr] gap-4">
@@ -80,7 +117,7 @@ function MailPage() {
               const Icon = f.icon;
               const active = folder === f.key;
               return (
-                <button key={f.key} onClick={() => { setFolder(f.key); setOpenId(null); }} className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm border-b last:border-b-0 ${active ? "bg-primary/10 text-primary font-semibold" : "hover:bg-muted"}`}>
+                <button key={f.key} onClick={() => { setFolder(f.key); setOpenId(null); setSelected(new Set()); }} className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm border-b last:border-b-0 ${active ? "bg-primary/10 text-primary font-semibold" : "hover:bg-muted"}`}>
                   <Icon className="h-4 w-4" /> {f.label}
                   {!!f.badge && f.badge > 0 && <span className="ml-auto bg-primary text-primary-foreground text-[10px] font-bold rounded-full px-1.5 py-0.5">{f.badge}</span>}
                 </button>
@@ -98,14 +135,24 @@ function MailPage() {
         {/* List + reader */}
         <div className="border rounded-xl bg-card min-h-[420px] overflow-hidden">
           {open ? (
-            <MessageView m={open} onBack={() => setOpenId(null)} onReply={() => reply(open)} onForward={() => forward(open)} onDelete={() => del.mutate(open.id)} />
+            <MessageView m={open} onBack={() => setOpenId(null)} onReply={() => reply(open)} onForward={() => forward(open)} onDelete={() => { if (confirm("Delete this message? This cannot be undone.")) del.mutate(open.id); }} />
           ) : messages.length === 0 ? (
             <div className="p-12 text-center text-sm text-muted-foreground">{isFetching ? "Loading…" : `No messages in ${folder}.`}</div>
           ) : (
             <ul className="divide-y">
+              {messages.length > 0 && (
+                <li className="flex items-center gap-3 px-4 py-2 bg-muted/40 text-xs">
+                  <input type="checkbox" aria-label="Select all"
+                    checked={selected.size === messages.length && messages.length > 0}
+                    onChange={(e) => setSelected(e.target.checked ? new Set(messages.map((m) => m.id)) : new Set())} />
+                  <span className="text-muted-foreground">{selected.size > 0 ? `${selected.size} selected` : "Select all"}</span>
+                </li>
+              )}
               {messages.map((m) => (
-                <li key={m.id}>
-                  <button onClick={() => (folder === "drafts" ? startCompose({ id: m.id, to: m.toAddr, cc: m.cc, bcc: m.bcc, subject: m.subject, html: m.html, inReplyTo: m.inReplyTo, attachments: m.attachments.map((a) => ({ filename: a.filename, url: a.url })), showCc: !!(m.cc || m.bcc) }) : setOpenId(m.id))} className="w-full text-left px-4 py-3 hover:bg-muted/60 flex items-center gap-3">
+                <li key={m.id} className="flex items-center gap-2 pr-2 hover:bg-muted/60 group">
+                  <input type="checkbox" aria-label={`Select ${m.subject || "message"}`} className="ml-4 shrink-0"
+                    checked={selected.has(m.id)} onChange={() => toggleSel(m.id)} onClick={(e) => e.stopPropagation()} />
+                  <button onClick={() => (folder === "drafts" ? startCompose({ id: m.id, to: m.toAddr, cc: m.cc, bcc: m.bcc, subject: m.subject, html: m.html, inReplyTo: m.inReplyTo, attachments: m.attachments.map((a) => ({ filename: a.filename, url: a.url })), showCc: !!(m.cc || m.bcc) }) : setOpenId(m.id))} className="min-w-0 flex-1 text-left px-2 py-3 flex items-center gap-3">
                     <div className="min-w-0 flex-1">
                       <div className="flex items-center gap-2">
                         <span className={`truncate text-sm ${m.isRead ? "" : "font-bold"}`}>{folder === "inbox" ? firstEmail(m.fromAddr) : firstEmail(m.toAddr)}</span>
@@ -115,6 +162,9 @@ function MailPage() {
                       <div className={`truncate text-sm ${m.isRead ? "text-muted-foreground" : "font-semibold"}`}>{m.subject || "(no subject)"}</div>
                     </div>
                     <span className="text-xs text-muted-foreground shrink-0">{new Date(m.createdAt).toLocaleDateString()}</span>
+                  </button>
+                  <button onClick={() => { if (confirm("Delete this message? This cannot be undone.")) del.mutate(m.id); }} title="Delete" className="p-2 rounded-md text-muted-foreground hover:text-destructive hover:bg-destructive/10 opacity-0 group-hover:opacity-100 focus:opacity-100 transition">
+                    <Trash2 className="h-4 w-4" />
                   </button>
                 </li>
               ))}

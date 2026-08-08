@@ -142,6 +142,34 @@ export const adminMailUpload = createServerFn({ method: "POST" })
     return storeUpload(data);
   });
 
+// Delete several messages at once (bulk selection in the list view).
+export const adminDeleteMails = createServerFn({ method: "POST" })
+  .inputValidator((i: unknown) => z.object({ ids: z.array(z.string().uuid()).min(1).max(200) }).parse(i))
+  .handler(async ({ data }): Promise<{ ok: true; deleted: number }> => {
+    const { requireMailAccess } = await import("@/server/auth/context");
+    const actor = await requireMailAccess();
+    const { db } = await import("@/server/db");
+    const { emailMessages } = await import("@/server/db/schema");
+    const { inArray } = await import("drizzle-orm");
+    const rows = await db.delete(emailMessages).where(inArray(emailMessages.id, data.ids)).returning({ id: emailMessages.id });
+    try { const { audit } = await import("@/server/audit"); await audit(actor, "email.delete.bulk", "email", `${rows.length} message(s)`); } catch { /* ignore */ }
+    return { ok: true, deleted: rows.length };
+  });
+
+// Empty a whole folder in one action.
+export const adminEmptyMailFolder = createServerFn({ method: "POST" })
+  .inputValidator((i: unknown) => z.object({ folder: z.enum(["inbox", "sent", "drafts"]) }).parse(i))
+  .handler(async ({ data }): Promise<{ ok: true; deleted: number }> => {
+    const { requireMailAccess } = await import("@/server/auth/context");
+    const actor = await requireMailAccess();
+    const { db } = await import("@/server/db");
+    const { emailMessages } = await import("@/server/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const rows = await db.delete(emailMessages).where(eq(emailMessages.folder, data.folder)).returning({ id: emailMessages.id });
+    try { const { audit } = await import("@/server/audit"); await audit(actor, "email.folder.empty", "email", `${data.folder}: ${rows.length}`); } catch { /* ignore */ }
+    return { ok: true, deleted: rows.length };
+  });
+
 // Delete a message from the client.
 export const adminDeleteMail = createServerFn({ method: "POST" })
   .inputValidator((i: unknown) => z.object({ id: z.string().uuid() }).parse(i))
