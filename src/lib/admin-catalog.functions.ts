@@ -333,3 +333,61 @@ export const adminImportProductsCsv = createServerFn({ method: "POST" })
     await audit(actor, "products.import", "products", "csv", { created, updated, errors });
     return { created, updated, errors };
   });
+
+/**
+ * Apply or remove an option group across a whole category.
+ *
+ * Setting "Processing: whole / family cut" on eleven fish one at a time is the
+ * kind of chore that gets done once and then forgotten for every product added
+ * afterwards. This makes it a two-click job that can be re-run whenever the
+ * catalogue grows.
+ *
+ * Matching is by group NAME, so re-applying updates the choices in place rather
+ * than stacking a second copy of the same group.
+ */
+export const adminBulkApplyOptionGroup = createServerFn({ method: "POST" })
+  .inputValidator((i: unknown) =>
+    z.object({
+      categorySlug: z.string().trim().max(80),   // "" = every category
+      mode: z.enum(["apply", "remove"]),
+      group: z.object({
+        name: z.string().trim().min(1).max(60),
+        nameBn: z.string().trim().max(80).default(""),
+        required: z.boolean().default(false),
+        choices: z.array(z.object({
+          label: z.string().trim().min(1).max(80),
+          priceDelta: z.number().int().min(-100000).max(100000).default(0),
+        })).max(20).default([]),
+      }),
+    }).parse(i),
+  )
+  .handler(async ({ data }): Promise<{ changed: number; total: number }> => {
+    const { requireManager } = await import("@/server/auth/context");
+    const actor = await requireManager();
+    const { db } = await import("@/server/db");
+    const { products } = await import("@/server/db/schema");
+    const { eq } = await import("drizzle-orm");
+
+    const rows = data.categorySlug
+      ? await db.select().from(products).where(eq(products.categorySlug, data.categorySlug))
+      : await db.select().from(products);
+
+    let changed = 0;
+    for (const row of rows) {
+      const current = (row.optionGroups ?? []) as typeof data.group[];
+      const without = current.filter((g) => g.name !== data.group.name);
+      const next = data.mode === "remove" ? without : [...without, data.group];
+      // Skip the write when nothing actually differs, so re-running is cheap and
+      // does not churn updatedAt across the whole catalogue.
+      if (JSON.stringify(next) === JSON.stringify(current)) continue;
+      await db.update(products).set({ optionGroups: next, updatedAt: new Date() }).where(eq(products.id, row.id));
+      changed++;
+    }
+
+    try {
+      const { audit } = await import("@/server/audit");
+      await audit(actor, "product.options.bulk", "product",
+        `${data.mode} "${data.group.name}" on ${data.categorySlug || "all categories"} (${changed})`);
+    } catch { /* audit best-effort */ }
+    return { changed, total: rows.length };
+  });

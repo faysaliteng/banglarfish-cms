@@ -1,11 +1,11 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { adminListProducts, adminUpsertProduct, adminDeleteProduct, adminListCategories, adminExportProductsCsv, adminImportProductsCsv } from "@/lib/admin-catalog.functions";
+import { adminListProducts, adminUpsertProduct, adminDeleteProduct, adminListCategories, adminExportProductsCsv, adminImportProductsCsv, adminBulkApplyOptionGroup } from "@/lib/admin-catalog.functions";
 import { adminListMedia } from "@/lib/admin-content.functions";
 import { getTaxPublic, getShippingClassesPublic } from "@/lib/site.functions";
 import { formatBDT } from "@/lib/cart";
-import { Search, Plus, Edit, Trash2, Package, X, Download, Upload, Grid3x3 } from "lucide-react";
+import { Search, Plus, Edit, Trash2, Package, X, Download, Upload, Grid3x3, Layers } from "lucide-react";
 import { Modal, TextField, TextArea, SelectField } from "@/components/admin/Modal";
 import { RichTextEditor } from "@/components/admin/RichTextEditor";
 import { AiButton } from "@/components/admin/AiButton";
@@ -182,6 +182,7 @@ function AdminProducts() {
   const [q, setQ] = useState("");
   const [cat, setCat] = useState("");
   const [editing, setEditing] = useState<FormState | null>(null);
+  const [bulkOpen, setBulkOpen] = useState(false);
 
   const loadProducts = () => {
     setLoading(true);
@@ -283,6 +284,13 @@ function AdminProducts() {
           <p className="text-sm text-muted-foreground">{products.length} total · {products.filter((p) => p.stock < 30).length} low stock</p>
         </div>
         <div className="flex items-center gap-2 flex-wrap">
+          <button
+            onClick={() => setBulkOpen(true)}
+            className="inline-flex items-center gap-2 border px-4 py-2 rounded-md text-sm font-semibold hover:bg-muted"
+            title="Add or remove an option group across a whole category"
+          >
+            <Layers className="h-4 w-4" /> Bulk options
+          </button>
           <button onClick={onExportCsv} className="inline-flex items-center gap-2 border px-3 py-2 rounded-md text-sm font-medium hover:bg-muted"><Download className="h-4 w-4" /> Export CSV</button>
           <label className="inline-flex items-center gap-2 border px-3 py-2 rounded-md text-sm font-medium hover:bg-muted cursor-pointer">
             <Upload className="h-4 w-4" /> {importing ? "Importing…" : "Import CSV"}
@@ -349,6 +357,9 @@ function AdminProducts() {
         </div>
       </div>
 
+      {bulkOpen && (
+        <BulkOptionsModal categories={categories} onClose={() => setBulkOpen(false)} onDone={loadProducts} />
+      )}
       <Modal open={!!editing} onClose={() => setEditing(null)} title={editing?.id ? "Edit product" : "New product"} size="xl">
         {editing && (
           <ProductForm
@@ -763,6 +774,91 @@ function OptionGroupEditor({ groups, onChange }: { groups: ProductOptionGroup[];
       >
         + Blank group
       </button>
+    </div>
+  );
+}
+
+
+/**
+ * Apply an option group to a whole category at once.
+ *
+ * Exists because the per-product editor, on its own, quietly loses: nobody sets
+ * "Processing" on eleven fish by hand and then remembers to do it again for the
+ * twelfth. Re-running is safe — a group is matched by name, so applying twice
+ * updates it rather than stacking a duplicate.
+ */
+function BulkOptionsModal({ categories, onClose, onDone }: { categories: Cat[]; onClose: () => void; onDone: () => void }) {
+  const bulkFn = useServerFn(adminBulkApplyOptionGroup);
+  const [cat, setCat] = useState<string>(categories[0]?.slug ?? "");
+  const [presetId, setPresetId] = useState(OPTION_PRESETS[0].id);
+  const [busy, setBusy] = useState(false);
+  const preset = OPTION_PRESETS.find((p) => p.id === presetId) ?? OPTION_PRESETS[0];
+
+  async function run(mode: "apply" | "remove") {
+    const where = cat ? (categories.find((c) => c.slug === cat)?.name ?? cat) : "EVERY category";
+    if (mode === "remove" && !confirm(`Remove "${preset.group.name}" from every product in ${where}?`)) return;
+    setBusy(true);
+    try {
+      const r = await bulkFn({ data: { categorySlug: cat, mode, group: preset.group } });
+      toast.success(
+        r.changed
+          ? `${mode === "apply" ? "Added to" : "Removed from"} ${r.changed} of ${r.total} product(s)`
+          : `Nothing to change — all ${r.total} product(s) already match`,
+      );
+      onDone();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Failed");
+    } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="fixed inset-0 z-[70] bg-black/50 grid place-items-center p-4" onClick={onClose}>
+      <div className="bg-card border rounded-lg shadow-2xl w-full max-w-lg p-5" onClick={(e) => e.stopPropagation()}>
+        <div className="flex items-center gap-2 mb-1">
+          <Layers className="h-5 w-5 text-primary" />
+          <h3 className="font-bold">Bulk product options</h3>
+          <button onClick={onClose} className="ml-auto p-1.5 rounded-md hover:bg-muted"><X className="h-4 w-4" /></button>
+        </div>
+        <p className="text-xs text-muted-foreground mb-4">
+          Add or remove a whole option group across a category in one go, then fine-tune
+          individual products in their own editor.
+        </p>
+
+        <label className="block mb-3">
+          <span className="text-xs font-semibold text-muted-foreground uppercase">Category</span>
+          <select value={cat} onChange={(e) => setCat(e.target.value)} className="mt-1 w-full border rounded-md px-3 py-2 text-sm bg-card">
+            {categories.map((c) => <option key={c.slug} value={c.slug}>{c.name}</option>)}
+            <option value="">— Every category —</option>
+          </select>
+        </label>
+
+        <label className="block mb-3">
+          <span className="text-xs font-semibold text-muted-foreground uppercase">Option group</span>
+          <select value={presetId} onChange={(e) => setPresetId(e.target.value)} className="mt-1 w-full border rounded-md px-3 py-2 text-sm bg-card">
+            {OPTION_PRESETS.map((p) => <option key={p.id} value={p.id}>{p.label}</option>)}
+          </select>
+        </label>
+
+        <div className="rounded-md border bg-muted/40 p-3 mb-4">
+          <p className="text-[11px] font-semibold uppercase text-muted-foreground mb-1.5">
+            {preset.group.name} · {preset.group.nameBn}{preset.group.required ? " · required" : ""}
+          </p>
+          <div className="flex flex-wrap gap-1.5">
+            {preset.group.choices.map((c) => (
+              <span key={c.label} className="text-xs border rounded px-2 py-1 bg-card">{c.label}</span>
+            ))}
+          </div>
+        </div>
+
+        <div className="flex gap-2">
+          <button onClick={() => run("remove")} disabled={busy} className="text-sm px-4 py-2 rounded-md border hover:bg-muted disabled:opacity-60">
+            Remove
+          </button>
+          <button onClick={() => run("apply")} disabled={busy} className="flex-1 bg-primary text-primary-foreground text-sm font-semibold px-5 py-2 rounded-md disabled:opacity-60">
+            {busy ? "Working…" : "Apply to category"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }
