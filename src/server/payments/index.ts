@@ -23,9 +23,42 @@ export type PaymentMethod = "cod" | "bkash" | "nagad" | "card";
 const providerName = (m: PaymentMethod) => (m === "card" ? "sslcommerz" : m);
 
 /* ---------------- SIMULATE ---------------- */
-function simulateInitiate(order: OrderForPayment, baseUrl: string, provider: string): InitResult {
+// The payment callback is a public URL (gateways redirect the buyer to it), so
+// the built-in simulator must not be forgeable: we HMAC-sign the order number
+// when the payment is initiated and require that signature back on the callback.
+// Without this, anyone could GET /api/payment/<anything>/success?order=… and
+// mark an arbitrary order paid.
+async function simulateKey(): Promise<string> {
+  const { db } = await import("@/server/db");
+  const { settings } = await import("@/server/db/schema");
+  const { eq } = await import("drizzle-orm");
+  const { randomBytes } = await import("node:crypto");
+  const [row] = await db.select().from(settings).where(eq(settings.key, "paymentSimKey")).limit(1);
+  const existing = (row?.value as { key?: string } | undefined)?.key;
+  if (existing) return existing;
+  const key = randomBytes(32).toString("hex");
+  await db.insert(settings).values({ key: "paymentSimKey", value: { key }, updatedAt: new Date() })
+    .onConflictDoUpdate({ target: settings.key, set: { value: { key }, updatedAt: new Date() } });
+  return key;
+}
+
+async function simSign(orderNumber: string): Promise<string> {
+  const { createHmac } = await import("node:crypto");
+  return createHmac("sha256", await simulateKey()).update(`sim:${orderNumber}`).digest("hex");
+}
+
+async function simVerify(orderNumber: string, sig: string): Promise<boolean> {
+  if (!orderNumber || !sig) return false;
+  const { timingSafeEqual } = await import("node:crypto");
+  const expect = Buffer.from(await simSign(orderNumber), "utf8");
+  const got = Buffer.from(sig, "utf8");
+  return expect.length === got.length && timingSafeEqual(expect, got);
+}
+
+async function simulateInitiate(order: OrderForPayment, baseUrl: string, provider: string): Promise<InitResult> {
   const tran = `SIM-${provider.toUpperCase()}-${order.orderNumber}`;
-  const url = `${baseUrl}/api/payment/simulate/pay?order=${encodeURIComponent(order.orderNumber)}&provider=${provider}&tran=${encodeURIComponent(tran)}`;
+  const sig = await simSign(order.orderNumber);
+  const url = `${baseUrl}/api/payment/simulate/pay?order=${encodeURIComponent(order.orderNumber)}&provider=${encodeURIComponent(provider)}&tran=${encodeURIComponent(tran)}&sig=${sig}`;
   return { redirectUrl: url, transactionId: tran };
 }
 
@@ -67,7 +100,11 @@ async function sslcommerzVerify(cfg: PaymentConfig, action: string, params: URLS
       return { orderNumber, status: "failed" };
     }
   }
-  return { orderNumber, transactionId: body.bank_tran_id, status: "paid" };
+  // Fail closed: without a val_id + store credentials we cannot prove anything
+  // about this callback. Return NO order number so the caller mutates nothing
+  // (otherwise anyone could flip arbitrary orders to "failed").
+  console.error("[payment] sslcommerz callback without val_id/credentials — ignoring");
+  return { status: "failed" };
 }
 
 /* ---------------- bKash ---------------- */
@@ -114,7 +151,7 @@ async function bkashVerify(cfg: PaymentConfig, action: string, params: URLSearch
 }
 
 /* ---------------- Nagad (simulate fallback until RSA signing wired) ---------------- */
-function nagadInitiate(order: OrderForPayment, baseUrl: string): InitResult {
+function nagadInitiate(order: OrderForPayment, baseUrl: string): Promise<InitResult> {
   return simulateInitiate(order, baseUrl, "nagad");
 }
 
@@ -122,12 +159,12 @@ function nagadInitiate(order: OrderForPayment, baseUrl: string): InitResult {
 export async function initiatePayment(method: PaymentMethod, order: OrderForPayment, baseUrl: string): Promise<InitResult & { provider: string }> {
   const cfg = await getPaymentConfig();
   const provider = providerName(method);
-  if (cfg.mode === "simulate") return { ...simulateInitiate(order, baseUrl, provider), provider };
+  if (cfg.mode === "simulate") return { ...(await simulateInitiate(order, baseUrl, provider)), provider };
   let r: InitResult;
   if (method === "card") r = await sslcommerzInitiate(cfg, order, baseUrl);
   else if (method === "bkash") r = await bkashInitiate(cfg, order, baseUrl);
-  else if (method === "nagad") r = nagadInitiate(order, baseUrl);
-  else r = simulateInitiate(order, baseUrl, provider);
+  else if (method === "nagad") r = await nagadInitiate(order, baseUrl);
+  else r = await simulateInitiate(order, baseUrl, provider);
   return { ...r, provider };
 }
 
@@ -145,15 +182,29 @@ export async function refundPayment(method: string, order: { orderNumber: string
   return { ok: false, needsManual: true, note: `Recorded. Complete the ${method} refund in the gateway dashboard.` };
 }
 
+// Resolve a public payment callback into a trusted result. This endpoint is
+// unauthenticated by necessity, so every path must FAIL CLOSED: a result of
+// "paid" may only come from a real gateway's server-to-server verification, or
+// from the built-in simulator with a valid HMAC we issued at initiation.
 export async function verifyPayment(provider: string, action: string, params: URLSearchParams, body: Record<string, string>): Promise<VerifyResult> {
   const cfg = await getPaymentConfig();
-  if (cfg.mode !== "simulate") {
-    if (provider === "sslcommerz") return sslcommerzVerify(cfg, action, params, body);
-    if (provider === "bkash") return bkashVerify(cfg, action, params);
-  }
   const orderNumber = params.get("order") || body.order || undefined;
-  const tran = params.get("tran") || body.tran || undefined;
-  if (action === "cancel") return { orderNumber, status: "cancelled" };
-  if (action === "fail") return { orderNumber, status: "failed" };
-  return { orderNumber, transactionId: tran, status: "paid" };
+
+  // Real gateways verify server-to-server, in every mode.
+  if (provider === "sslcommerz") return sslcommerzVerify(cfg, action, params, body);
+  if (provider === "bkash") return bkashVerify(cfg, action, params);
+
+  // Built-in simulator — only in simulate mode, and only with our signature.
+  if (cfg.mode === "simulate" && orderNumber && (await simVerify(orderNumber, params.get("sig") || body.sig || ""))) {
+    const tran = params.get("tran") || body.tran || undefined;
+    if (action === "cancel") return { orderNumber, status: "cancelled" };
+    if (action === "fail") return { orderNumber, status: "failed" };
+    return { orderNumber, transactionId: tran, status: "paid" };
+  }
+
+  // Unknown provider, or missing/invalid signature. Return WITHOUT an order
+  // number so the caller mutates nothing at all — otherwise an unauthenticated
+  // caller could flip arbitrary orders to "failed" (payment-status DoS).
+  console.error(`[payment] rejected unverified callback provider=${provider} action=${action}`);
+  return { status: "failed" };
 }

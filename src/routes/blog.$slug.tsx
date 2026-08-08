@@ -82,7 +82,7 @@ function BlogPost() {
           </div>
         )}
         {commentsEnabled && <Comments postId={post.id} />}
-        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(ld) }} />
+        <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(ld).replace(/</g, "\\u003c") }} />
       </article>
     </SiteLayout>
   );

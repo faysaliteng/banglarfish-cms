@@ -15,10 +15,25 @@ function slugify(s: string): string {
 // we still never emit executable JS from stored content.
 function sanitize(html: string): string {
   return (html || "")
-    .replace(/<script[\s\S]*?<\/script>/gi, "")
+    // Remove script/iframe/object/embed entirely (including unclosed tags).
+    .replace(/<\s*script\b[\s\S]*?(<\/\s*script\s*>|$)/gi, "")
+    .replace(/<\s*(iframe|object|embed|base|meta|link)\b[^>]*>/gi, "")
+    // Inline event handlers, quoted or bare.
     .replace(/\son\w+\s*=\s*"[^"]*"/gi, "")
     .replace(/\son\w+\s*=\s*'[^']*'/gi, "")
-    .replace(/javascript:/gi, "");
+    .replace(/\son\w+\s*=\s*[^\s>]+/gi, "")
+    .replace(/javascript:/gi, "")
+    .replace(/\ssrcdoc\s*=/gi, " data-srcdoc=");
+}
+
+// CSS is injected into a <style> element, so the only escape is closing the tag.
+// Neutralise "</style>" (and any stray "</") plus JS-bearing url()/expression().
+function sanitizeCss(css: string): string {
+  return (css || "")
+    .replace(/<\s*\/\s*style/gi, "")
+    .replace(/<\s*\//g, "")
+    .replace(/javascript:/gi, "")
+    .replace(/expression\s*\(/gi, "");
 }
 
 export const adminListLanding = createServerFn({ method: "GET" }).handler(async (): Promise<LandingPage[]> => {
@@ -71,7 +86,7 @@ export const adminSaveLanding = createServerFn({ method: "POST" })
       if (clash.length === 0) { slug = candidate; break; }
     }
 
-    const values = { slug, title: data.title, html: sanitize(data.html), css: data.css, published: data.published, updatedAt: new Date() };
+    const values = { slug, title: data.title, html: sanitize(data.html), css: sanitizeCss(data.css), published: data.published, updatedAt: new Date() };
     let row;
     if (data.id) {
       [row] = await db.update(landingPages).set(values).where(eq(landingPages.id, data.id)).returning();
@@ -105,5 +120,5 @@ export const getLandingPublic = createServerFn({ method: "GET" })
     const { eq, and } = await import("drizzle-orm");
     const [row] = await db.select().from(landingPages).where(and(eq(landingPages.slug, data.slug), eq(landingPages.published, true))).limit(1);
     if (!row) return null;
-    return { title: row.title, html: sanitize(row.html), css: row.css };
+    return { title: row.title, html: sanitize(row.html), css: sanitizeCss(row.css) };
   });

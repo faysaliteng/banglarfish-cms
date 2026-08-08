@@ -219,7 +219,7 @@ function RootComponent() {
       <ThemeStyle theme={theme} />
       {siteCss && <style id="bf-site-css" dangerouslySetInnerHTML={{ __html: siteCss }} />}
       {customCode && <CustomCode headHtml={customCode.headHtml} bodyEnd={customCode.bodyEnd} />}
-      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(orgLd) }} />
+      <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(orgLd).replace(/</g, "\\u003c") }} />
       <VisitorTracker />
       {/* #bf-root carries the surface/layout/effect data-attributes the theme CSS keys off. */}
       <div

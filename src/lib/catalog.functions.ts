@@ -300,7 +300,7 @@ export const submitReview = createServerFn({ method: "POST" })
 
 export const subscribeNewsletter = createServerFn({ method: "POST" })
   .inputValidator((i: unknown) => z.object({ email: z.string().trim().email().max(255) }).parse(i))
-  .handler(async ({ data }): Promise<{ ok: true; issued: boolean; code?: string }> => {
+  .handler(async ({ data }): Promise<{ ok: true; issued: boolean }> => {
     const email = data.email.toLowerCase();
     const { db } = await import("@/server/db");
     const { newsletterSubscribers, coupons } = await import("@/server/db/schema");
@@ -335,5 +335,5 @@ export const subscribeNewsletter = createServerFn({ method: "POST" })
       void sendEmailSafe({ ...mail, to: email });
     } catch { /* email best-effort */ }
 
-    return { ok: true, issued: true, code };
+    return { ok: true, issued: true };
   });

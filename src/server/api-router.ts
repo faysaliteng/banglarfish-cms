@@ -461,19 +461,22 @@ ${items.join("\n")}
 function simulatePayPage(request: Request): Response {
   const url = new URL(request.url);
   const order = url.searchParams.get("order") ?? "";
-  const provider = url.searchParams.get("provider") ?? "gateway";
+  const provider = (url.searchParams.get("provider") ?? "gateway").replace(/[^a-z0-9_-]/gi, "").slice(0, 24) || "gateway";
   const tran = url.searchParams.get("tran") ?? "";
+  const sig = (url.searchParams.get("sig") ?? "").replace(/[^a-f0-9]/gi, "").slice(0, 64);
   const b = baseUrl(request);
-  const success = `${b}/api/payment/${provider}/success?order=${encodeURIComponent(order)}&tran=${encodeURIComponent(tran)}`;
-  const cancel = `${b}/api/payment/${provider}/cancel?order=${encodeURIComponent(order)}`;
+  // Escape anything interpolated into the HTML below (these are query params).
+  const esc = (s: string) => s.replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#39;");
+  const success = `${b}/api/payment/${provider}/success?order=${encodeURIComponent(order)}&tran=${encodeURIComponent(tran)}&sig=${encodeURIComponent(sig)}`;
+  const cancel = `${b}/api/payment/${provider}/cancel?order=${encodeURIComponent(order)}&sig=${encodeURIComponent(sig)}`;
   const html = `<!doctype html><html><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Sandbox payment</title>
 <style>body{font:15px/1.6 system-ui,sans-serif;background:#eef5fb;display:grid;place-items:center;min-height:100vh;margin:0}
 .card{background:#fff;border-radius:16px;padding:28px;max-width:380px;box-shadow:0 12px 40px -12px rgba(0,0,0,.2);text-align:center}
 .b{display:inline-block;padding:12px 22px;border-radius:10px;font-weight:600;text-decoration:none;margin:6px}
 .pay{background:#29ABE2;color:#fff}.cancel{background:#eee;color:#333}</style></head>
-<body><div class="card"><h2>Sandbox ${provider} payment</h2>
-<p>Order <b>#${order}</b></p><p style="color:#666">This is a simulated gateway (PAYMENT_MODE=simulate). Wire real credentials to go live.</p>
-<a class="b pay" href="${success}">Pay now ✓</a><a class="b cancel" href="${cancel}">Cancel</a></div></body></html>`;
+<body><div class="card"><h2>Sandbox ${esc(provider)} payment</h2>
+<p>Order <b>#${esc(order)}</b></p><p style="color:#666">This is a simulated gateway (PAYMENT_MODE=simulate). Wire real credentials to go live.</p>
+<a class="b pay" href="${esc(success)}">Pay now ✓</a><a class="b cancel" href="${esc(cancel)}">Cancel</a></div></body></html>`;
   return new Response(html, { headers: { "content-type": "text/html; charset=utf-8" } });
 }
 

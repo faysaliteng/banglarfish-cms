@@ -129,7 +129,13 @@ export const adminUpdateUser = createServerFn({ method: "POST" })
     if (data.email) userPatch.email = data.email.toLowerCase();
     if (data.full_name) userPatch.fullName = data.full_name;
     if (data.phone) userPatch.phone = data.phone;
-    if (data.role) userPatch.role = data.role;
+    // Changing a role is an ADMIN-only action: a manager must not be able to
+    // promote themselves (or anyone else) to admin.
+    if (data.role) {
+      const { requireAdmin } = await import("@/server/auth/context");
+      await requireAdmin();
+      userPatch.role = data.role;
+    }
     if (data.customer_group !== undefined) userPatch.customerGroup = data.customer_group;
     if (data.password && data.password.length >= 8) userPatch.passwordHash = await hashPassword(data.password);
     await db.update(users).set(userPatch).where(eq(users.id, data.id));

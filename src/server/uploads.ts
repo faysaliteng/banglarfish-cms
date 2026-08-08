@@ -42,8 +42,16 @@ export async function storeUpload(data: { filename: string; dataUrl: string }): 
   const [dupe] = await db.select().from(media).where(eq(media.hash, hash)).limit(1);
   if (dupe) return { id: dupe.id, url: dupe.url, name: dupe.name, size: dupe.size };
 
-  const safe = data.filename.replace(/[^a-zA-Z0-9._-]/g, "-").slice(-80);
-  const finalName = `${randomBytes(6).toString("hex")}-${safe}`;
+  // The stored extension MUST come from the sniffed content type, never from the
+  // user-supplied filename: a PNG/HTML polyglot saved as ".html" would be served
+  // from our own origin as HTML (stored XSS).
+  const EXT_FOR: Record<string, string> = {
+    "image/jpeg": "jpg", "image/png": "png", "image/webp": "webp",
+    "image/gif": "gif", "image/avif": "avif", "image/svg+xml": "svg", "application/pdf": "pdf",
+  };
+  const ext = EXT_FOR[detected] ?? "bin";
+  const base = data.filename.replace(/\.[^.]*$/, "").replace(/[^a-zA-Z0-9_-]/g, "-").slice(-60) || "file";
+  const finalName = `${randomBytes(6).toString("hex")}-${base}.${ext}`;
   const dir = process.env.UPLOAD_DIR ?? path.join(process.cwd(), "public", "uploads");
   await mkdir(dir, { recursive: true });
   await writeFile(path.join(dir, finalName), buffer);

@@ -26,8 +26,17 @@ for ($i = 0; $i -lt 40; $i++) {
 
 $env:DATABASE_URL      = $DbUrl
 $env:SMS_DEV_MODE      = "true"      # OTP codes print to this console instead of SMS
-$env:SEED_ADMIN_EMAIL  = "admin@banglarfish.com"
-$env:SEED_ADMIN_PASSWORD = "Admin@Banglarfish2026"
+# Local seed admin. NEVER hardcode a password here — this file is in git.
+# Set them in your shell before running, e.g.
+#   $env:SEED_ADMIN_EMAIL="you@example.com"; $env:SEED_ADMIN_PASSWORD="…"
+# If unset, a strong random password is generated and printed once below.
+if (-not $env:SEED_ADMIN_EMAIL) { $env:SEED_ADMIN_EMAIL = "admin@banglarfish.com" }
+if (-not $env:SEED_ADMIN_PASSWORD) {
+  $bytes = New-Object 'System.Byte[]' 18
+  [System.Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($bytes)
+  $env:SEED_ADMIN_PASSWORD = [Convert]::ToBase64String($bytes)
+  $script:GeneratedAdminPassword = $true
+}
 
 if (-not (Test-Path node_modules)) {
   Write-Host ">> Installing dependencies (first run)..." -ForegroundColor Cyan
@@ -42,7 +51,12 @@ Write-Host ""
 Write-Host "==========================================================" -ForegroundColor Green
 Write-Host "  Banglarfish is starting at:  http://127.0.0.1:$Port/" -ForegroundColor Green
 Write-Host "  Admin panel:  http://127.0.0.1:$Port/admin" -ForegroundColor Green
-Write-Host "  Admin login:  admin@banglarfish.com / Admin@Banglarfish2026" -ForegroundColor Green
+Write-Host "  Admin login:  $($env:SEED_ADMIN_EMAIL)" -ForegroundColor Green
+if ($script:GeneratedAdminPassword) {
+  Write-Host "  Admin password (generated, shown once): $($env:SEED_ADMIN_PASSWORD)" -ForegroundColor Yellow
+} else {
+  Write-Host "  Admin password: (from `$env:SEED_ADMIN_PASSWORD)" -ForegroundColor DarkGray
+}
 Write-Host "  (Signup OTP codes appear in THIS window while testing.)" -ForegroundColor DarkGray
 Write-Host "  Press Ctrl+C to stop." -ForegroundColor Green
 Write-Host "==========================================================" -ForegroundColor Green

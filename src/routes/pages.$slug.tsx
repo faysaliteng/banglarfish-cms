@@ -70,7 +70,7 @@ function Page() {
             </div>
           </section>
         )}
-        {faqLd && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqLd) }} />}
+        {faqLd && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqLd).replace(/</g, "\\u003c") }} />}
       </div>
     </SiteLayout>
   );
