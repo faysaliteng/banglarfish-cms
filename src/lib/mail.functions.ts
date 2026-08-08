@@ -73,12 +73,16 @@ export const adminSendMail = createServerFn({ method: "POST" })
       html: z.string().max(200_000).default(""),
       inReplyTo: z.string().max(200).default(""),
       attachments: z.array(z.object({ filename: z.string().max(260), url: z.string().max(500) })).max(10).default([]),
+      // Wrap the body in the branded shell (logo header + address footer).
+      // Defaults on: an unbranded reply from a shop looks like a phishing
+      // attempt. Off is for the rare plain-text-ish reply.
+      wrap: z.boolean().default(true),
     }).parse(i),
   )
   .handler(async ({ data }): Promise<{ ok: true }> => {
     const { requireMailAccess } = await import("@/server/auth/context");
     const actor = await requireMailAccess();
-    const { sendEmail } = await import("@/server/email");
+    const { sendEmail, wrapInBrandLayout } = await import("@/server/email");
     const path = await import("node:path");
 
     // Resolve /uploads/<name> attachments to on-disk paths (only allow the uploads dir).
@@ -87,9 +91,12 @@ export const adminSendMail = createServerFn({ method: "POST" })
       .filter((a) => a.url.startsWith("/uploads/"))
       .map((a) => ({ filename: a.filename || path.basename(a.url), path: path.join(uploadDir, path.basename(a.url)), url: a.url }));
 
+    // Wrap before sending AND before logging, so the copy kept in the Sent
+    // folder is byte-identical to what the recipient actually received.
+    const html = data.wrap ? await wrapInBrandLayout(data.html) : data.html;
     await sendEmail({
       to: data.to, cc: data.cc || undefined, bcc: data.bcc || undefined,
-      subject: data.subject, html: data.html, attachments: atts, category: "manual",
+      subject: data.subject, html, attachments: atts, category: "manual",
       inReplyTo: data.inReplyTo || undefined,
     });
     try {

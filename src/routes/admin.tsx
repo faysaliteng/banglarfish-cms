@@ -127,6 +127,14 @@ function AdminLayout() {
   // Close the mobile drawer on navigation.
   useEffect(() => setDrawer(false), [loc.pathname]);
 
+  // The binding accepts both modifiers, so the hint must match the platform —
+  // showing ⌘K to a Windows user is just wrong. Resolved after mount to keep the
+  // server and client markup identical.
+  const [shortcutKey, setShortcutKey] = useState("Ctrl K");
+  useEffect(() => {
+    if (/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent)) setShortcutKey("⌘K");
+  }, []);
+
   // ⌘K / Ctrl+K toggles the command palette.
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
@@ -202,6 +210,12 @@ function AdminLayout() {
 
   return (
     <div className="bf-admin min-h-screen bg-muted/30 lg:grid lg:grid-cols-[240px_1fr]">
+      {/* themeToCss() scales the root font-size by the merchant's storefront
+          "font scale" setting, which resizes the whole admin along with it.
+          Every other admin token is pinned in styles.css, but rem units resolve
+          against <html>, so this one has to be undone here — and only while the
+          admin is mounted, so the storefront keeps its scale. */}
+      <style>{"html{font-size:100%!important}"}</style>
       {/* Desktop sidebar */}
       <aside className="hidden lg:flex min-h-screen bg-[oklch(0.16_0.02_250)] text-white/90 sticky top-0 h-screen overflow-y-auto flex-col">
         {sidebar}
@@ -230,9 +244,13 @@ function AdminLayout() {
             <span className="text-muted-foreground/50">/</span>
             <span className="font-semibold">{currentItem?.label ?? "Dashboard"}</span>
           </div>
-          <button onClick={() => setCmdOpen(true)} className="inline-flex items-center gap-2 border rounded-lg px-3 py-1.5 text-sm text-muted-foreground hover:bg-muted transition">
-            <Search className="h-4 w-4" /> Search…
-            <kbd className="text-[10px] border rounded px-1 ml-1">⌘K</kbd>
+          <button
+            onClick={() => setCmdOpen(true)}
+            className="group inline-flex items-center gap-2.5 w-64 border border-input bg-card rounded-md pl-3 pr-1.5 py-1.5 text-sm text-muted-foreground hover:border-muted-foreground/40 hover:text-foreground transition-colors"
+          >
+            <Search className="h-4 w-4 shrink-0 opacity-70" />
+            <span className="flex-1 text-left">Search or jump to…</span>
+            <kbd className="shrink-0 text-[11px] leading-none font-medium text-muted-foreground/80 bg-muted border border-border rounded px-1.5 py-1">{shortcutKey}</kbd>
           </button>
         </div>
         <div className="p-4 sm:p-6 md:p-8">

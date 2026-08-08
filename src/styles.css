@@ -400,3 +400,110 @@
   background: none !important;
   animation: none !important;
 }
+
+/* ----------------------------------------------------------------------------
+   Admin design tokens.
+
+   themeToCss() emits --radius (0-40px), --input, --card and the font stack from
+   whatever the MERCHANT picked for their shop. The admin inherits those, so a
+   40px-radius storefront theme turned every admin text input into a pill and
+   tinted the whole panel. The admin is a tool, not a storefront: it gets its own
+   fixed, tested tokens and stops re-styling itself when the shop theme changes.
+
+   Only structural tokens are pinned. Nothing here touches the storefront, and
+   the Theme & Layout live preview is unaffected because that component is
+   entirely inline-styled (no var() or .bg-primary usage).
+   -------------------------------------------------------------------------- */
+.bf-admin {
+  --radius: 8px;                              /* tight; a tool, not a landing page */
+  --background: #f6f7f9;
+  --foreground: #16202e;
+  --card: #ffffff;
+  --card-foreground: #16202e;
+  --popover: #ffffff;
+  --popover-foreground: #16202e;
+  --muted: #eef1f5;
+  --muted-foreground: #5b6a7e;
+  --secondary: #eef1f5;
+  --secondary-foreground: #16202e;
+  --border: #dde3ea;
+  --input: #cfd7e1;
+  --accent: #e6f6f8;
+  --accent-foreground: #0b7f8d;
+  /* Pinned rather than inherited: the merchant's primary may be a pale colour
+     that leaves white button text unreadable. The admin accent must be safe. */
+  --primary: #0ea5b7;
+  --primary-foreground: #ffffff;
+  --ring: #0ea5b7;
+  --destructive: #dc2626;
+  --font-display: var(--font-sans);            /* no decorative display face in a tool */
+  color: var(--foreground);
+}
+.bf-admin.dark,
+.dark .bf-admin {
+  --background: #0e131a;
+  --foreground: #e7ecf3;
+  --card: #161d26;
+  --card-foreground: #e7ecf3;
+  --popover: #161d26;
+  --popover-foreground: #e7ecf3;
+  --muted: #1b232e;
+  --muted-foreground: #93a2b5;
+  --secondary: #1b232e;
+  --secondary-foreground: #e7ecf3;
+  --border: #29323e;
+  --input: #38434f;
+  --accent: #0d2f35;
+  --accent-foreground: #4fd1e0;
+}
+
+/* Neutralise the storefront's decorative button effects inside the admin.
+   Deliberately NOT overriding border-radius here: this block is outside
+   @layer, so a border-radius rule would beat Tailwind's `utilities` layer and
+   flatten every intentional rounded-full / rounded-xl in the admin. It isn't
+   needed anyway — `utilities` already outranks the engine's `components`-layer
+   [data-pill] rule, so an explicit rounded-* class always wins. Pinning
+   --radius above is what actually fixes the pill-shaped inputs. */
+#bf-root[data-gradient-buttons="on"] .bf-admin .bg-primary {
+  background-image: none;
+  background-color: var(--primary);
+}
+/* Buttons must not glow, lift or bounce — that is storefront personality
+   leaking into a tool that gets clicked hundreds of times an hour. */
+.bf-admin .bg-primary,
+.bf-admin button.bg-primary:hover,
+.bf-admin a.bg-primary:hover,
+.bf-admin button.bg-primary:active,
+.bf-admin a.bg-primary:active {
+  box-shadow: none;
+  transform: none;
+  filter: none;
+}
+/* The merchant's display font must not reach admin headings. */
+#bf-root .bf-admin h1,
+#bf-root .bf-admin h2,
+#bf-root .bf-admin h3,
+#bf-root .bf-admin h4,
+#bf-root .bf-admin h5 {
+  font-family: var(--font-sans);
+  letter-spacing: -0.011em;
+}
+
+/* Form controls: one consistent, quiet treatment everywhere in the admin,
+   instead of each screen hand-rolling its own border and focus ring. */
+.bf-admin input:not([type="checkbox"]):not([type="radio"]):not([type="range"]):not([type="color"]),
+.bf-admin select,
+.bf-admin textarea {
+  background-color: var(--card);
+  border-color: var(--input);
+}
+.bf-admin input:focus-visible,
+.bf-admin select:focus-visible,
+.bf-admin textarea:focus-visible {
+  outline: none;
+  border-color: var(--primary);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--primary) 18%, transparent);
+}
+.bf-admin ::placeholder {
+  color: color-mix(in srgb, var(--muted-foreground) 78%, transparent);
+}

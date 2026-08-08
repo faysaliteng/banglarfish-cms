@@ -1,18 +1,36 @@
 import { createFileRoute } from "@tanstack/react-router";
-import { useMemo, useState } from "react";
+import { lazy, Suspense, useMemo, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { adminListMail, adminGetMail, adminSendMail, adminDeleteMail, adminListRecipients, adminMailUpload, adminSaveDraft, adminDeleteMails, adminEmptyMailFolder } from "@/lib/mail.functions";
 import { RichTextEditor } from "@/components/admin/RichTextEditor";
 import type { EmailMessage } from "@/lib/config-types";
-import { Inbox, Send, FileText, PenSquare, Paperclip, Reply, Forward, Trash2, X, RefreshCw, Mail as MailIcon, AlertCircle } from "lucide-react";
+import { Inbox, Send, FileText, PenSquare, Paperclip, Reply, Forward, Trash2, X, RefreshCw, Mail as MailIcon, AlertCircle, LayoutTemplate, Eye, Pencil, ChevronDown } from "lucide-react";
+// The template library is ~400 KB of copy in two languages. Lazy so it is
+// fetched the first time someone opens the picker, not on every admin page load.
+const TemplatePicker = lazy(() => import("@/components/admin/TemplatePicker"));
+import { fillTemplate, unfilledVariables, KNOWN_VARIABLES } from "@/lib/email-templates";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/admin/mail")({ component: MailPage });
 
 type Folder = "inbox" | "sent" | "drafts";
-type Draft = { id?: string; to: string; cc: string; bcc: string; subject: string; html: string; inReplyTo: string; attachments: { filename: string; url: string }[]; showCc: boolean };
-const emptyDraft: Draft = { to: "", cc: "", bcc: "", subject: "", html: "", inReplyTo: "", attachments: [], showCc: false };
+type Draft = {
+  id?: string; to: string; cc: string; bcc: string; subject: string; html: string;
+  inReplyTo: string; attachments: { filename: string; url: string }[]; showCc: boolean;
+  /** Send inside the branded shell (logo header + address footer). */
+  wrap: boolean;
+  /**
+   * The unfilled template body, kept alongside the rendered html so the
+   * variable inputs can re-substitute from the original every keystroke.
+   * Without it, filling {{customer_name}} once would destroy the placeholder
+   * and a correction could never be applied.
+   */
+  tplBody?: string;
+  tplQuote?: string;
+  vars?: Record<string, string>;
+};
+const emptyDraft: Draft = { to: "", cc: "", bcc: "", subject: "", html: "", inReplyTo: "", attachments: [], showCc: false, wrap: true };
 
 function firstEmail(s: string): string {
   const m = /<([^>]+)>/.exec(s);
@@ -212,8 +230,51 @@ function ComposeModal({ draft, setDraft, recipients, onClose, onSent, onDraftSav
   const draftFn = useServerFn(adminSaveDraft);
   const [busy, setBusy] = useState(false);
   const [uploading, setUploading] = useState(false);
+  const [picker, setPicker] = useState(false);
+  const [preview, setPreview] = useState(false);
   const set = (patch: Partial<Draft>) => setDraft({ ...draft, ...patch });
   const recipOptions = useMemo(() => recipients.slice(0, 500), [recipients]);
+
+  // What we can fill in without asking. The recipient's name comes from the
+  // customer list; the rest the agent supplies in the "Fill in" strip.
+  const knownVars = useMemo(() => {
+    const to = firstEmail(draft.to).toLowerCase();
+    const match = recipients.find((r) => r.email.toLowerCase() === to);
+    return { customer_name: match?.name || "", ...(draft.vars ?? {}) };
+  }, [draft.to, draft.vars, recipients]);
+
+  // Placeholders still showing in the subject or body. Send is blocked on this:
+  // mailing a literal "{{customer_name}}" to a paying customer is the worst
+  // failure this feature has.
+  const missing = useMemo(
+    () => unfilledVariables(draft.subject, draft.html),
+    [draft.subject, draft.html],
+  );
+
+  function applyTemplate(subject: string, body: string) {
+    // A reply keeps its "Re: …" subject and its quoted original; the template
+    // becomes the new message sitting above the quote.
+    const qi = draft.html.indexOf("<blockquote");
+    const quote = qi >= 0 ? draft.html.slice(qi) : "";
+    setDraft({
+      ...draft,
+      subject: draft.inReplyTo && draft.subject.trim() ? draft.subject : subject,
+      html: quote ? `${body}<br>${quote}` : body,
+      tplBody: body,
+      tplQuote: quote,
+      vars: {},
+    });
+    setPicker(false);
+  }
+
+  // Re-substitute from the pristine template so a value can be corrected.
+  function setVar(name: string, value: string) {
+    const vars = { ...(draft.vars ?? {}), [name]: value };
+    const base = draft.tplBody;
+    if (!base) { setDraft({ ...draft, vars }); return; }
+    const filled = fillTemplate(base, { ...knownVars, ...vars });
+    setDraft({ ...draft, vars, html: draft.tplQuote ? `${filled}<br>${draft.tplQuote}` : filled });
+  }
 
   async function onFiles(files: FileList | null) {
     if (!files || !files.length) return;
@@ -245,9 +306,13 @@ function ComposeModal({ draft, setDraft, recipients, onClose, onSent, onDraftSav
 
   async function send() {
     if (!draft.to.trim()) return toast.error("Add a recipient.");
+    if (missing.length) {
+      return toast.error(`Fill in ${missing.map((m) => `{{${m}}}`).join(", ")} before sending.`);
+    }
+    if (!draft.subject.trim() && !confirm("Send without a subject?")) return;
     setBusy(true);
     try {
-      await sendFn({ data: { to: draft.to.trim(), cc: draft.cc.trim(), bcc: draft.bcc.trim(), subject: draft.subject.trim(), html: draft.html, inReplyTo: draft.inReplyTo, attachments: draft.attachments } });
+      await sendFn({ data: { to: draft.to.trim(), cc: draft.cc.trim(), bcc: draft.bcc.trim(), subject: draft.subject.trim(), html: draft.html, inReplyTo: draft.inReplyTo, attachments: draft.attachments, wrap: draft.wrap } });
       toast.success("Email sent");
       onSent();
     } catch (e) { toast.error(e instanceof Error ? e.message : "Send failed"); }
@@ -255,48 +320,154 @@ function ComposeModal({ draft, setDraft, recipients, onClose, onSent, onDraftSav
   }
 
   return (
-    <div className="fixed inset-0 z-50 bg-black/40 flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
-      <div className="bg-background rounded-2xl shadow-xl w-full max-w-2xl my-8" onClick={(e) => e.stopPropagation()}>
-        <div className="flex items-center justify-between p-4 border-b">
-          <h3 className="font-bold">New message</h3>
-          <button onClick={onClose} className="p-1.5 rounded-md hover:bg-muted"><X className="h-5 w-5" /></button>
+    <div className="fixed inset-0 z-[60] bg-black/50 flex items-start justify-center p-4 overflow-y-auto" onClick={onClose}>
+      <div
+        className="bg-card border rounded-lg shadow-2xl w-full max-w-2xl my-6 flex flex-col overflow-hidden"
+        onClick={(e) => e.stopPropagation()}
+      >
+        {/* Title bar */}
+        <div className="flex items-center gap-2 h-11 px-3 border-b bg-muted/40 shrink-0">
+          <MailIcon className="h-4 w-4 text-muted-foreground" />
+          <h3 className="text-sm font-semibold truncate">
+            {draft.subject.trim() || (draft.inReplyTo ? "Reply" : "New message")}
+          </h3>
+          <button onClick={onClose} className="ml-auto p-1.5 rounded-md hover:bg-muted" aria-label="Close">
+            <X className="h-4 w-4" />
+          </button>
         </div>
-        <div className="p-4 space-y-3">
-          <div>
-            <input value={draft.to} onChange={(e) => set({ to: e.target.value })} list="mail-recips" placeholder="To (email address)" className="w-full border rounded-md px-3 py-2 text-sm" />
+
+        {/* Address rows — hairline separated, borderless fields. Reads as a mail
+            client rather than a stack of form boxes. */}
+        <div className="shrink-0">
+          <Row label="To">
+            <input
+              value={draft.to}
+              onChange={(e) => set({ to: e.target.value })}
+              list="mail-recips"
+              placeholder="name@example.com"
+              className="w-full bg-transparent border-0 outline-none text-sm py-2.5"
+            />
             <datalist id="mail-recips">{recipOptions.map((r, i) => <option key={i} value={r.email}>{r.name}</option>)}</datalist>
-          </div>
-          {!draft.showCc ? (
-            <button onClick={() => set({ showCc: true })} className="text-xs text-primary font-semibold">+ Cc / Bcc</button>
-          ) : (
-            <div className="grid grid-cols-2 gap-2">
-              <input value={draft.cc} onChange={(e) => set({ cc: e.target.value })} placeholder="Cc" className="border rounded-md px-3 py-2 text-sm" />
-              <input value={draft.bcc} onChange={(e) => set({ bcc: e.target.value })} placeholder="Bcc" className="border rounded-md px-3 py-2 text-sm" />
-            </div>
+            {!draft.showCc && (
+              <button onClick={() => set({ showCc: true })} className="text-xs text-muted-foreground hover:text-foreground shrink-0 px-1">
+                Cc / Bcc
+              </button>
+            )}
+          </Row>
+          {draft.showCc && (
+            <>
+              <Row label="Cc">
+                <input value={draft.cc} onChange={(e) => set({ cc: e.target.value })} className="w-full bg-transparent border-0 outline-none text-sm py-2.5" />
+              </Row>
+              <Row label="Bcc">
+                <input value={draft.bcc} onChange={(e) => set({ bcc: e.target.value })} className="w-full bg-transparent border-0 outline-none text-sm py-2.5" />
+              </Row>
+            </>
           )}
-          <input value={draft.subject} onChange={(e) => set({ subject: e.target.value })} placeholder="Subject" className="w-full border rounded-md px-3 py-2 text-sm" />
-          <RichTextEditor value={draft.html} onChange={(v) => set({ html: v })} placeholder="Write your message…" />
-          {draft.attachments.length > 0 && (
-            <div className="flex flex-wrap gap-2">
-              {draft.attachments.map((a, i) => (
-                <span key={i} className="inline-flex items-center gap-1.5 text-xs border rounded-md px-2.5 py-1.5 bg-muted/50">
-                  <Paperclip className="h-3.5 w-3.5" /> {a.filename}
-                  <button onClick={() => set({ attachments: draft.attachments.filter((_, j) => j !== i) })} className="text-destructive hover:opacity-70"><X className="h-3.5 w-3.5" /></button>
-                </span>
+          <Row label="Subject">
+            <input
+              value={draft.subject}
+              onChange={(e) => set({ subject: e.target.value })}
+              className="w-full bg-transparent border-0 outline-none text-sm py-2.5 font-medium"
+            />
+          </Row>
+        </div>
+
+        {/* Action strip */}
+        <div className="flex items-center gap-1.5 px-3 py-2 border-b bg-muted/20 shrink-0">
+          <button
+            onClick={() => setPicker(true)}
+            className="inline-flex items-center gap-1.5 text-xs font-medium border rounded-md px-2.5 py-1.5 bg-card hover:bg-muted"
+          >
+            <LayoutTemplate className="h-3.5 w-3.5" /> Templates <ChevronDown className="h-3 w-3 opacity-60" />
+          </button>
+          <button
+            onClick={() => setPreview((v) => !v)}
+            className={`inline-flex items-center gap-1.5 text-xs font-medium border rounded-md px-2.5 py-1.5 ${preview ? "bg-primary text-primary-foreground border-primary" : "bg-card hover:bg-muted"}`}
+          >
+            {preview ? <Pencil className="h-3.5 w-3.5" /> : <Eye className="h-3.5 w-3.5" />} {preview ? "Edit" : "Preview"}
+          </button>
+          <label className="inline-flex items-center gap-1.5 text-xs font-medium ml-auto cursor-pointer select-none" title="Adds the logo header and the shop address footer">
+            <input type="checkbox" checked={draft.wrap} onChange={(e) => set({ wrap: e.target.checked })} className="accent-[var(--primary)]" />
+            Brand layout
+          </label>
+        </div>
+
+        {/* Variable fill-in strip — only when a template left placeholders. */}
+        {missing.length > 0 && (
+          <div className="px-3 py-2.5 border-b bg-amber-50 dark:bg-amber-950/30 shrink-0">
+            <p className="text-[11px] font-semibold text-amber-900 dark:text-amber-200 mb-1.5">
+              Fill in before sending
+            </p>
+            <div className="grid sm:grid-cols-2 gap-1.5">
+              {missing.map((v) => (
+                <label key={v} className="flex items-center gap-1.5">
+                  <span className="text-[11px] text-amber-900/80 dark:text-amber-200/80 w-28 shrink-0 truncate" title={KNOWN_VARIABLES[v] ?? v}>
+                    {KNOWN_VARIABLES[v] ?? v}
+                  </span>
+                  <input
+                    value={draft.vars?.[v] ?? ""}
+                    onChange={(e) => setVar(v, e.target.value)}
+                    placeholder={`{{${v}}}`}
+                    className="flex-1 min-w-0 border rounded px-2 py-1 text-xs bg-card"
+                  />
+                </label>
               ))}
             </div>
+          </div>
+        )}
+
+        {/* Body */}
+        <div className="min-h-[240px]">
+          {preview ? (
+            <div className="p-4 prose-content text-sm max-h-[45vh] overflow-y-auto" dangerouslySetInnerHTML={{ __html: draft.html || "<p class='text-muted-foreground'>Nothing to preview yet.</p>" }} />
+          ) : (
+            <RichTextEditor value={draft.html} onChange={(v) => set({ html: v })} placeholder="Write your message…" />
           )}
         </div>
-        <div className="flex items-center gap-2 p-4 border-t">
-          <button onClick={send} disabled={busy} className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-5 py-2.5 rounded-md font-semibold hover:bg-primary/90 disabled:opacity-60"><Send className="h-4 w-4" /> {busy ? "Sending…" : "Send"}</button>
-          <button onClick={saveDraft} disabled={busy} className="text-sm px-3 py-2 rounded-md border hover:bg-muted disabled:opacity-60">Save draft</button>
-          <label className="inline-flex items-center gap-1.5 text-sm px-3 py-2 rounded-md border hover:bg-muted cursor-pointer">
-            <Paperclip className="h-4 w-4" /> {uploading ? "Uploading…" : "Attach"}
+
+        {draft.attachments.length > 0 && (
+          <div className="flex flex-wrap gap-1.5 px-3 py-2 border-t shrink-0">
+            {draft.attachments.map((a, i) => (
+              <span key={i} className="inline-flex items-center gap-1.5 text-xs border rounded-md px-2 py-1 bg-muted/50">
+                <Paperclip className="h-3 w-3" /> {a.filename}
+                <button onClick={() => set({ attachments: draft.attachments.filter((_, j) => j !== i) })} className="text-destructive hover:opacity-70"><X className="h-3 w-3" /></button>
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Footer */}
+        <div className="flex items-center gap-2 px-3 py-2.5 border-t bg-muted/30 shrink-0">
+          <button onClick={send} disabled={busy} className="inline-flex items-center gap-2 bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-semibold hover:bg-primary/90 disabled:opacity-60">
+            <Send className="h-4 w-4" /> {busy ? "Sending…" : "Send"}
+          </button>
+          <button onClick={saveDraft} disabled={busy} className="p-2 rounded-md hover:bg-muted disabled:opacity-60" title="Save draft"><FileText className="h-4 w-4" /></button>
+          <label className="p-2 rounded-md hover:bg-muted cursor-pointer" title="Attach a file">
+            {uploading ? <RefreshCw className="h-4 w-4 animate-spin" /> : <Paperclip className="h-4 w-4" />}
             <input type="file" multiple className="hidden" onChange={(e) => onFiles(e.target.files)} accept="image/*,application/pdf" />
           </label>
-          <span className="text-xs text-muted-foreground ml-auto">From your store address</span>
+          <span className="text-xs text-muted-foreground ml-auto truncate">
+            {draft.wrap ? "Branded · from your store address" : "Plain · from your store address"}
+          </span>
         </div>
       </div>
+
+      {picker && (
+        <Suspense fallback={<div className="fixed inset-0 z-[70] bg-black/50 grid place-items-center text-sm text-white">Loading templates…</div>}>
+          <TemplatePicker vars={knownVars} onPick={applyTemplate} onClose={() => setPicker(false)} />
+        </Suspense>
+      )}
+    </div>
+  );
+}
+
+/** One labelled row of the address block: fixed-width label, hairline below. */
+function Row({ label, children }: { label: string; children: React.ReactNode }) {
+  return (
+    <div className="flex items-center gap-2 px-3 border-b">
+      <span className="text-xs text-muted-foreground w-14 shrink-0">{label}</span>
+      {children}
     </div>
   );
 }

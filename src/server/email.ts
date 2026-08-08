@@ -107,6 +107,22 @@ function layout(b: Brand, bodyHtml: string): string {
 </body></html>`;
 }
 
+/**
+ * Wrap an arbitrary body fragment in the branded shell.
+ *
+ * Exported for the admin mail client: a reply typed in the compose box is a
+ * bare fragment, and sending it raw is how manual mail ended up with no logo
+ * and no footer while every transactional email had both.
+ *
+ * Idempotent by inspection — if the body already looks like a full document
+ * (an admin pasted exported HTML, or a draft was saved post-wrap) it is
+ * returned untouched rather than nested inside a second shell.
+ */
+export async function wrapInBrandLayout(bodyHtml: string): Promise<string> {
+  if (/<\s*(html|!doctype)/i.test(bodyHtml.slice(0, 400))) return bodyHtml;
+  return layout(await brand(), bodyHtml);
+}
+
 // Bengali labels for order statuses (used in emails).
 const STATUS_LABEL_BN: Record<string, string> = { confirmed: "নিশ্চিত হয়েছে", processing: "প্রস্তুত করা হচ্ছে", packed: "প্যাক করা হয়েছে", shipped: "ডেলিভারির পথে", delivered: "ডেলিভার হয়েছে", cancelled: "বাতিল হয়েছে", refunded: "রিফান্ড হয়েছে" };
 
