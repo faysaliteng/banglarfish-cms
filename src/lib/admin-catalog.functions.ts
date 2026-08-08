@@ -6,9 +6,11 @@ export type AdminProduct = Product & { active: boolean };
 
 const VariantInput = z.object({
   id: z.string().uuid().optional(),
-  label: z.string().trim().min(1).max(40),
+  label: z.string().trim().min(1).max(80),
   price: z.number().int().nonnegative(),
   stock: z.number().int().nonnegative(),
+  sku: z.string().max(80).optional().nullable(),
+  attributes: z.array(z.object({ name: z.string().max(60), value: z.string().max(120) })).default([]),
 });
 
 const ProductInput = z.object({
@@ -33,6 +35,13 @@ const ProductInput = z.object({
   attributes: z.array(z.object({ name: z.string().max(60), value: z.string().max(200) })).default([]),
   sku: z.string().max(80).optional().nullable(),
   brand: z.string().max(120).optional().nullable(),
+  taxClass: z.string().max(60).default("standard"),
+  shippingClass: z.string().max(60).default(""),
+  lowStockThreshold: z.number().int().nonnegative().default(0),
+  isDigital: z.boolean().default(false),
+  downloadUrl: z.string().max(1000).default(""),
+  noindex: z.boolean().optional(),
+  focusKeyword: z.string().max(120).optional(),
   metaTitle: z.string().max(200).optional().nullable(),
   metaDescription: z.string().max(400).optional().nullable(),
   ogImage: z.string().max(1000).optional().nullable(),
@@ -87,6 +96,13 @@ export const adminUpsertProduct = createServerFn({ method: "POST" })
       attributes: data.attributes,
       sku: data.sku ?? null,
       brand: data.brand ?? null,
+      taxClass: data.taxClass || "standard",
+      shippingClass: data.shippingClass || "",
+      lowStockThreshold: data.lowStockThreshold ?? 0,
+      isDigital: data.isDigital ?? false,
+      downloadUrl: data.downloadUrl || "",
+      noindex: data.noindex ?? false,
+      focusKeyword: data.focusKeyword ?? "",
       metaTitle: data.metaTitle ?? null,
       metaDescription: data.metaDescription ?? null,
       ogImage: data.ogImage ?? null,
@@ -95,7 +111,16 @@ export const adminUpsertProduct = createServerFn({ method: "POST" })
 
     let productId: string;
     if (data.id) {
+      const [old] = await db.select({ slug: products.slug }).from(products).where(eq(products.id, data.id)).limit(1);
       await db.update(products).set(base).where(eq(products.id, data.id));
+      if (old?.slug && old.slug !== data.slug) {
+        // Slug-history 301 on product rename.
+        try {
+          const { redirects } = await import("@/server/db/schema");
+          await db.delete(redirects).where(eq(redirects.fromPath, `/product/${data.slug}`));
+          await db.insert(redirects).values({ fromPath: `/product/${old.slug}`, toPath: `/product/${data.slug}`, code: 301, active: true }).onConflictDoUpdate({ target: redirects.fromPath, set: { toPath: `/product/${data.slug}`, active: true } });
+        } catch { /* best-effort */ }
+      }
       productId = data.id;
     } else {
       const [row] = await db.insert(products).values(base).returning({ id: products.id });
@@ -106,10 +131,18 @@ export const adminUpsertProduct = createServerFn({ method: "POST" })
     await db.delete(productVariants).where(eq(productVariants.productId, productId));
     if (data.variants.length) {
       await db.insert(productVariants).values(
-        data.variants.map((v, idx) => ({ productId, label: v.label, price: v.price, stock: v.stock, sort: idx })),
+        data.variants.map((v, idx) => ({ productId, label: v.label, price: v.price, stock: v.stock, sku: v.sku ?? null, attributes: v.attributes ?? [], sort: idx })),
       );
     }
 
+    if (data.active) {
+      try {
+        const { enqueue } = await import("@/server/jobs");
+        const { emit } = await import("@/server/events");
+        void enqueue("seo.indexnow", { paths: [`/product/${data.slug}`] });
+        void emit("content.published", { kind: "product", slug: data.slug, id: productId });
+      } catch { /* ignore */ }
+    }
     await audit(user, data.id ? "product.update" : "product.create", "product", productId, { name: data.name });
     return { id: productId };
   });

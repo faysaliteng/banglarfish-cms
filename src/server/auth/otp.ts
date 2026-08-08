@@ -22,10 +22,11 @@ export async function issueOtp(
   const expiresAt = new Date(Date.now() + TTL_MS);
   await db.insert(otpCodes).values({ phone, purpose, payload, codeHash: hashCode(phone, code), expiresAt });
 
-  const sms = await sendSms(
-    phone,
-    `Your Banglarfish verification code is ${code}. It expires in 5 minutes. Do not share it.`,
-  );
+  const { getSmsTemplates, fillTemplate } = await import("@/server/templates");
+  let store = "Banglarfish";
+  try { const { getBrandingConfig } = await import("@/server/site-config"); const b = await getBrandingConfig(); if (b?.storeName) store = b.storeName; } catch { /* default */ }
+  const otpTpl = (await getSmsTemplates()).otp;
+  const sms = await sendSms(phone, fillTemplate(otpTpl, { code, store }));
   if (!sms.ok) return { ok: false, error: sms.error ?? "Could not send SMS" };
 
   // Surface the code to the client only in dev mode so testing works without SMS credits.

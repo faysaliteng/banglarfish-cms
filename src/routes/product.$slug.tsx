@@ -7,6 +7,7 @@ import { useState } from "react";
 import { Star, ShoppingBag, Truck, ShieldCheck, Snowflake, Minus, Plus } from "lucide-react";
 import type { Variant } from "@/lib/types";
 import { sanitizeHtml } from "@/lib/sanitize-html";
+import { Img } from "@/components/site/Img";
 
 function stripHtml(s: string) {
   return s.replace(/<[^>]*>/g, " ").replace(/\s+/g, " ").trim();
@@ -19,26 +20,40 @@ export const Route = createFileRoute("/product/$slug")({
   loader: async ({ params }) => {
     const data = await getProductBySlug({ data: { slug: params.slug } });
     if (!data) throw notFound();
-    return data;
+    const siteUrl = typeof process !== "undefined" ? (process.env.APP_URL || "").replace(/\/+$/, "") : "";
+    return { ...data, siteUrl };
   },
   head: ({ loaderData }) => {
     if (!loaderData) return { meta: [{ title: "Product not found" }, { name: "robots", content: "noindex" }] };
     const p = loaderData.product;
+    const base = (loaderData.siteUrl || "").replace(/\/+$/, "");
+    const canonical = base ? `${base}/product/${p.slug}` : `/product/${p.slug}`;
+    const ogImage = p.image ? (/^https?:\/\//i.test(p.image) ? p.image : base + p.image) : undefined;
+    const desc = stripHtml(p.description).slice(0, 155);
+    const title = `${p.metaTitle || p.name} — Banglarfish`;
     return {
       meta: [
-        { title: `${p.name} — Banglarfish` },
-        { name: "description", content: p.description.slice(0, 155) },
-        { property: "og:title", content: `${p.name} — Banglarfish` },
-        { property: "og:description", content: p.description.slice(0, 155) },
+        { title },
+        { name: "description", content: p.metaDescription || desc },
+        { property: "og:title", content: title },
+        { property: "og:description", content: p.metaDescription || desc },
         { property: "og:type", content: "product" },
+        { property: "og:url", content: canonical },
+        ...(ogImage ? [{ property: "og:image", content: ogImage }] : []),
+        { name: "twitter:card", content: ogImage ? "summary_large_image" : "summary" },
+        { name: "twitter:title", content: title },
+        { name: "twitter:description", content: p.metaDescription || desc },
+        ...(ogImage ? [{ name: "twitter:image", content: ogImage }] : []),
+        ...(p.noindex ? [{ name: "robots", content: "noindex, follow" }] : []),
       ],
+      links: [{ rel: "canonical", href: canonical }],
     };
   },
   component: ProductPage,
 });
 
 function ProductPage() {
-  const { product, related, reviews } = Route.useLoaderData();
+  const { product, related, reviews, siteUrl } = Route.useLoaderData();
   const hasVariants = product.variants.length > 0;
   const [variant, setVariant] = useState<Variant | null>(product.variants[1] ?? product.variants[0] ?? null);
   const [weightLabel, setWeightLabel] = useState(product.weightOptions[1] ?? product.weightOptions[0] ?? "");
@@ -58,6 +73,7 @@ function ProductPage() {
       price: unitPrice,
       weight: variant?.label ?? weightLabel,
       qty,
+      isDigital: !!product.isDigital,
     });
     setAdded(true);
     setTimeout(() => setAdded(false), 1500);
@@ -71,7 +87,7 @@ function ProductPage() {
       <div className="container-x pb-10 grid md:grid-cols-2 gap-10">
         <div>
           <div className="aspect-square rounded-2xl overflow-hidden bg-muted border">
-            <img src={product.image} alt={product.name} className="h-full w-full object-cover" />
+            <Img src={product.image} alt={product.name} width={800} height={800} widths={[600, 1000]} sizes="(max-width: 768px) 100vw, 50vw" priority className="h-full w-full object-cover" />
           </div>
         </div>
         <div>
@@ -200,6 +216,20 @@ function ProductPage() {
             brand: product.brand ? { "@type": "Brand", name: product.brand } : undefined,
             offers: { "@type": "Offer", priceCurrency: getCurrency().code, price: getCurrency().decimals > 0 ? unitPrice / Math.pow(10, getCurrency().decimals) : unitPrice, availability: product.stock > 0 ? "https://schema.org/InStock" : "https://schema.org/OutOfStock" },
             aggregateRating: product.reviews > 0 ? { "@type": "AggregateRating", ratingValue: product.rating, reviewCount: product.reviews } : undefined,
+          }),
+        }}
+      />
+      <script
+        type="application/ld+json"
+        dangerouslySetInnerHTML={{
+          __html: JSON.stringify({
+            "@context": "https://schema.org",
+            "@type": "BreadcrumbList",
+            itemListElement: [
+              { "@type": "ListItem", position: 1, name: "Home", item: siteUrl ? `${siteUrl}/` : undefined },
+              { "@type": "ListItem", position: 2, name: "Shop", item: siteUrl ? `${siteUrl}/shop` : undefined },
+              { "@type": "ListItem", position: 3, name: product.name, item: siteUrl ? `${siteUrl}/product/${product.slug}` : undefined },
+            ],
           }),
         }}
       />

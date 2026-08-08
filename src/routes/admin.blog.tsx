@@ -3,11 +3,23 @@ import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { adminListBlog, adminUpsertBlog, adminDeleteBlog } from "@/lib/admin-content.functions";
 import type { BlogPost } from "@/lib/types";
-import { Plus, Pencil, Trash2, Search, Newspaper, ExternalLink } from "lucide-react";
+import { Plus, Pencil, Trash2, Search, Newspaper, ExternalLink, History, Clock } from "lucide-react";
 import { Modal, TextField, TextArea, SelectField } from "@/components/admin/Modal";
 import { RichTextEditor } from "@/components/admin/RichTextEditor";
 import { SeoAnalyzer } from "@/components/admin/SeoAnalyzer";
+import { RevisionHistory } from "@/components/admin/RevisionHistory";
+import { AiButton } from "@/components/admin/AiButton";
+import { aiAssist, aiGenerateMeta } from "@/lib/ai.functions";
 import { toast } from "sonner";
+
+// Convert a stored ISO timestamp to a value for <input type="datetime-local"> (local time).
+function isoToLocalInput(iso: string | null | undefined): string {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d.getTime())) return "";
+  const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+  return local.toISOString().slice(0, 16);
+}
 
 export const Route = createFileRoute("/admin/blog")({ component: BlogPage });
 
@@ -22,9 +34,12 @@ type Draft = {
   category: string;
   tags: string;
   status: "draft" | "published";
+  publishedAt: string; // datetime-local value; blank = publish now
   metaTitle: string;
   metaDescription: string;
   ogImage: string;
+  noindex: boolean;
+  focusKeyword: string;
 };
 
 const emptyDraft: Draft = {
@@ -37,21 +52,27 @@ const emptyDraft: Draft = {
   category: "",
   tags: "",
   status: "draft",
+  publishedAt: "",
   metaTitle: "",
   metaDescription: "",
   ogImage: "",
+  noindex: false,
+  focusKeyword: "",
 };
 
 function BlogPage() {
   const listFn = useServerFn(adminListBlog);
   const upsertFn = useServerFn(adminUpsertBlog);
   const deleteFn = useServerFn(adminDeleteBlog);
+  const assistFn = useServerFn(aiAssist);
+  const genMetaFn = useServerFn(aiGenerateMeta);
 
   const [posts, setPosts] = useState<BlogPost[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
   const [q, setQ] = useState<string>("");
   const [editing, setEditing] = useState<Draft | null>(null);
   const [saving, setSaving] = useState<boolean>(false);
+  const [revsFor, setRevsFor] = useState<string | undefined>(undefined);
 
   const load = () => {
     setLoading(true);
@@ -103,6 +124,9 @@ function BlogPage() {
             .map((s) => s.trim())
             .filter(Boolean),
           status: editing.status,
+          publishedAt: editing.publishedAt ? new Date(editing.publishedAt).toISOString() : undefined,
+          noindex: editing.noindex,
+          focusKeyword: editing.focusKeyword.trim(),
           metaTitle: editing.metaTitle.trim(),
           metaDescription: editing.metaDescription.trim(),
           ogImage: editing.ogImage.trim(),
@@ -141,6 +165,9 @@ function BlogPage() {
       category: p.category || "",
       tags: (p.tags || []).join(", "),
       status: p.status,
+      publishedAt: isoToLocalInput(p.publishedAt),
+      noindex: !!p.noindex,
+      focusKeyword: p.focusKeyword || "",
       metaTitle: p.metaTitle || "",
       metaDescription: p.metaDescription || "",
       ogImage: p.ogImage || "",
@@ -209,13 +236,11 @@ function BlogPage() {
                     <td className="text-muted-foreground">{p.author || "—"}</td>
                     <td className="text-muted-foreground">{p.category || "—"}</td>
                     <td>
-                      <span
-                        className={`px-2 py-0.5 rounded-full text-xs font-semibold ${
-                          p.status === "published" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"
-                        }`}
-                      >
-                        {p.status}
-                      </span>
+                      {(() => {
+                        const scheduled = p.status === "published" && p.publishedAt && new Date(p.publishedAt).getTime() > Date.now();
+                        const cls = scheduled ? "bg-sky-100 text-sky-700" : p.status === "published" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700";
+                        return <span className={`px-2 py-0.5 rounded-full text-xs font-semibold ${cls}`}>{scheduled ? "scheduled" : p.status}</span>;
+                      })()}
                     </td>
                     <td className="text-muted-foreground text-xs">
                       {p.publishedAt ? new Date(p.publishedAt).toLocaleDateString() : "—"}
@@ -299,6 +324,22 @@ function BlogPage() {
                 <option value="published">Published</option>
               </SelectField>
             </div>
+            {editing.status === "published" && (
+              <div>
+                <label className="block text-sm font-medium mb-1 flex items-center gap-1.5"><Clock className="h-3.5 w-3.5" /> Publish date &amp; time</label>
+                <input
+                  type="datetime-local"
+                  value={editing.publishedAt}
+                  onChange={(e) => setEditing({ ...editing, publishedAt: e.target.value })}
+                  className="w-full border rounded-md px-3 py-2 text-sm"
+                />
+                <p className="text-xs text-muted-foreground mt-1">
+                  {editing.publishedAt && new Date(editing.publishedAt).getTime() > Date.now()
+                    ? `⏰ Scheduled — this post will go live automatically on ${new Date(editing.publishedAt).toLocaleString()}.`
+                    : "Leave blank to publish immediately, or pick a future date/time to schedule."}
+                </p>
+              </div>
+            )}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
               <TextField
                 label="Category"
@@ -325,16 +366,34 @@ function BlogPage() {
               onChange={(e) => setEditing({ ...editing, excerpt: e.target.value })}
             />
             <div>
-              <label className="block text-sm font-medium mb-1">Body</label>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium">Body</label>
+                <div className="flex items-center gap-3">
+                  <AiButton label={editing.body.trim() ? "AI improve" : "AI draft"} run={async () => (await assistFn({ data: { text: editing.body.trim() || editing.title, action: editing.body.trim() ? "improve" : "draft" } })).text} onText={(t) => setEditing((e) => (e ? { ...e, body: t } : e))} />
+                  <AiButton label="AI translate → বাংলা" run={async () => (await assistFn({ data: { text: editing.body || editing.title, action: "translate", lang: "Bengali" } })).text} onText={(t) => setEditing((e) => (e ? { ...e, body: t } : e))} />
+                </div>
+              </div>
               <RichTextEditor value={editing.body} onChange={(html) => setEditing({ ...editing, body: html })} />
             </div>
 
             <div className="pt-2 border-t">
-              <h3 className="text-sm font-semibold mb-2">SEO</h3>
+              <div className="flex items-center justify-between mb-2">
+                <h3 className="text-sm font-semibold">SEO</h3>
+                <AiButton label="AI meta" run={async () => { const r = await genMetaFn({ data: { title: editing.title, content: editing.body.replace(/<[^>]*>/g, " ").slice(0, 1500), focusKeyword: editing.focusKeyword } }); setEditing((e) => (e ? { ...e, metaTitle: r.metaTitle || e.metaTitle, metaDescription: r.metaDescription || e.metaDescription } : e)); toast.success("AI meta filled"); return ""; }} />
+              </div>
               <div className="mb-3">
-                <SeoAnalyzer title={editing.title} description={editing.metaDescription || editing.excerpt} slug={editing.slug} content={editing.body} hasImage={!!editing.coverImage} />
+                <SeoAnalyzer title={editing.title} description={editing.metaDescription || editing.excerpt} slug={editing.slug} content={editing.body} hasImage={!!editing.coverImage} focusKeyword={editing.focusKeyword} />
               </div>
               <div className="space-y-3">
+                <TextField
+                  label="Focus keyphrase"
+                  value={editing.focusKeyword}
+                  onChange={(e) => setEditing({ ...editing, focusKeyword: e.target.value })}
+                  placeholder="e.g. hilsa fish recipe"
+                />
+                <label className="flex items-center gap-2 text-sm">
+                  <input type="checkbox" checked={editing.noindex} onChange={(e) => setEditing({ ...editing, noindex: e.target.checked })} /> Noindex (hide this post from search engines)
+                </label>
                 <TextField
                   label="Meta title"
                   value={editing.metaTitle}
@@ -356,6 +415,15 @@ function BlogPage() {
             </div>
 
             <div className="flex justify-end gap-2 pt-2 border-t">
+              {editing.id && (
+                <button
+                  type="button"
+                  onClick={() => setRevsFor(editing.id)}
+                  className="mr-auto inline-flex items-center gap-1.5 px-4 py-2 rounded-md border text-sm hover:bg-muted"
+                >
+                  <History className="h-4 w-4" /> Revisions
+                </button>
+              )}
               <button
                 type="button"
                 onClick={() => setEditing(null)}
@@ -374,6 +442,14 @@ function BlogPage() {
           </form>
         )}
       </Modal>
+
+      <RevisionHistory
+        open={!!revsFor}
+        onClose={() => setRevsFor(undefined)}
+        entityType="blog"
+        entityId={revsFor}
+        onRestored={() => { setEditing(null); load(); }}
+      />
     </div>
   );
 }

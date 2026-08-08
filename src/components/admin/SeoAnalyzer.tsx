@@ -6,8 +6,8 @@ import { Check, AlertTriangle, X, Gauge } from "lucide-react";
  * Yoast / Rank Math-style live SEO analysis. Pass the draft fields; it renders
  * a focus-keyword input, an overall score, and a traffic-light checklist.
  */
-export function SeoAnalyzer(props: Omit<SeoInput, "focusKeyword"> & { compact?: boolean }) {
-  const [kw, setKw] = useState("");
+export function SeoAnalyzer(props: Omit<SeoInput, "focusKeyword"> & { compact?: boolean; focusKeyword?: string }) {
+  const [kw, setKw] = useState(props.focusKeyword ?? "");
   const report = useMemo(() => analyzeSeo({ ...props, focusKeyword: kw }), [props, kw]);
 
   const ring = report.grade === "good" ? "text-emerald-600" : report.grade === "ok" ? "text-amber-500" : "text-red-500";

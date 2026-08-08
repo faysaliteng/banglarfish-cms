@@ -3,7 +3,7 @@ import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { adminGetHomepage, adminSaveHomepage } from "@/lib/admin-content.functions";
 import type { Homepage, HomeSections } from "@/lib/types";
-import { Blocks, Save, Grid3x3, Workflow, Star, Sparkles, Megaphone, PackagePlus, ChefHat, Newspaper, Quote, Mail } from "lucide-react";
+import { Blocks, Save, Grid3x3, Workflow, Star, Sparkles, Megaphone, PackagePlus, ChefHat, Newspaper, Quote, Mail, MessageSquare } from "lucide-react";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/admin/modules")({ component: ModulesPage });
@@ -19,6 +19,8 @@ const MODULES: { key: keyof HomeSections; label: string; desc: string; icon: Rea
   { key: "blog", label: "Blog", desc: "Article cards + the /blog page & nav link.", icon: Newspaper },
   { key: "testimonials", label: "Testimonials", desc: "Customer review quotes.", icon: Quote },
   { key: "newsletter", label: "Newsletter signup", desc: "Email capture band with your offer.", icon: Mail },
+  { key: "comments", label: "Blog comments", desc: "Reader comments on posts, with admin moderation.", icon: MessageSquare },
+  { key: "contact", label: "Contact page", desc: "The /contact page + form that lands in your inbox.", icon: Mail },
 ];
 
 function ModulesPage() {

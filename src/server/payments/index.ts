@@ -131,6 +131,20 @@ export async function initiatePayment(method: PaymentMethod, order: OrderForPaym
   return { ...r, provider };
 }
 
+// Refund dispatcher. In simulate mode (or COD) it's a book-keeping no-op that
+// succeeds; for real gateways it's where the provider refund API is called.
+// bKash/SSLCommerz refunds require their refund endpoints + credentials — until
+// wired they return needsManual so staff complete it in the gateway dashboard.
+export async function refundPayment(method: string, order: { orderNumber: string; transactionId: string | null }, amount: number): Promise<{ ok: boolean; needsManual?: boolean; note: string }> {
+  const cfg = await getPaymentConfig();
+  if (method === "cod") return { ok: true, note: "COD — no gateway refund needed" };
+  if (cfg.mode === "simulate") return { ok: true, note: `Simulated refund of ${amount} for ${order.orderNumber}` };
+  // Real gateway refund APIs (bKash /payment/refund, SSLCommerz refund) require the
+  // original gateway transaction id + credentials; surface for manual completion.
+  console.log(`[refund] ${method} refund ${amount} for ${order.orderNumber} (txn ${order.transactionId ?? "n/a"}) — complete in gateway dashboard`);
+  return { ok: false, needsManual: true, note: `Recorded. Complete the ${method} refund in the gateway dashboard.` };
+}
+
 export async function verifyPayment(provider: string, action: string, params: URLSearchParams, body: Record<string, string>): Promise<VerifyResult> {
   const cfg = await getPaymentConfig();
   if (cfg.mode !== "simulate") {

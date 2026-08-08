@@ -11,7 +11,9 @@ export async function getSettingsValue(): Promise<Settings> {
 
 export async function getHomepageValue(): Promise<Homepage> {
   const [row] = await db.select().from(settings).where(eq(settings.key, "homepage")).limit(1);
-  return { ...defaultHomepage, ...((row?.value as Partial<Homepage>) ?? {}) };
+  const saved = (row?.value as Partial<Homepage>) ?? {};
+  // Deep-merge sections so newly added module toggles (e.g. comments/contact) always resolve.
+  return { ...defaultHomepage, ...saved, sections: { ...defaultHomepage.sections, ...(saved.sections ?? {}) } };
 }
 
 export async function saveSettingsValue(value: Settings): Promise<void> {

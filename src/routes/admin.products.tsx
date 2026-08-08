@@ -3,12 +3,16 @@ import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { adminListProducts, adminUpsertProduct, adminDeleteProduct, adminListCategories, adminExportProductsCsv, adminImportProductsCsv } from "@/lib/admin-catalog.functions";
 import { adminListMedia } from "@/lib/admin-content.functions";
+import { getTaxPublic, getShippingClassesPublic } from "@/lib/site.functions";
 import { formatBDT } from "@/lib/cart";
-import { Search, Plus, Edit, Trash2, Package, X, Download, Upload } from "lucide-react";
+import { Search, Plus, Edit, Trash2, Package, X, Download, Upload, Grid3x3 } from "lucide-react";
 import { Modal, TextField, TextArea, SelectField } from "@/components/admin/Modal";
 import { RichTextEditor } from "@/components/admin/RichTextEditor";
+import { AiButton } from "@/components/admin/AiButton";
+import { aiGenerateDescription, aiGenerateMeta } from "@/lib/ai.functions";
 import { toast } from "sonner";
 import type { Product, Variant } from "@/lib/types";
+import type { TaxClass, ShippingClass } from "@/lib/config-types";
 
 export const Route = createFileRoute("/admin/products")({ component: AdminProducts });
 
@@ -16,7 +20,7 @@ type Row = Product & { active: boolean };
 type Cat = { slug: string; name: string };
 type Media = { id: string; name: string; url: string };
 
-type FormVariant = { id?: string; label: string; price: number; stock: number };
+type FormVariant = { id?: string; label: string; price: number; stock: number; sku?: string; attributes?: FormAttribute[] };
 type FormAttribute = { name: string; value: string };
 
 type FormState = {
@@ -39,6 +43,13 @@ type FormState = {
   variants: FormVariant[];
   sku: string;
   brand: string;
+  taxClass: string;
+  shippingClass: string;
+  lowStockThreshold: number;
+  isDigital: boolean;
+  downloadUrl: string;
+  noindex: boolean;
+  focusKeyword: string;
   tags: string[];
   attributes: FormAttribute[];
   metaTitle: string;
@@ -64,9 +75,16 @@ function toForm(p: Row): FormState {
     isBest: !!p.isBest,
     isNew: !!p.isNew,
     active: p.active,
-    variants: (p.variants ?? []).map((v: Variant) => ({ id: v.id, label: v.label, price: v.price, stock: v.stock })),
+    variants: (p.variants ?? []).map((v: Variant) => ({ id: v.id, label: v.label, price: v.price, stock: v.stock, sku: v.sku ?? "", attributes: v.attributes ?? [] })),
     sku: p.sku ?? "",
     brand: p.brand ?? "",
+    taxClass: p.taxClass ?? "standard",
+    shippingClass: p.shippingClass ?? "",
+    lowStockThreshold: p.lowStockThreshold ?? 0,
+    isDigital: !!p.isDigital,
+    downloadUrl: p.downloadUrl ?? "",
+    noindex: !!p.noindex,
+    focusKeyword: p.focusKeyword ?? "",
     tags: p.tags ?? [],
     attributes: (p.attributes ?? []).map((a) => ({ name: a.name, value: a.value })),
     metaTitle: p.metaTitle ?? "",
@@ -95,6 +113,13 @@ function emptyForm(category: string, image: string): FormState {
     variants: [],
     sku: "",
     brand: "",
+    taxClass: "standard",
+    shippingClass: "",
+    lowStockThreshold: 0,
+    isDigital: false,
+    downloadUrl: "",
+    noindex: false,
+    focusKeyword: "",
     tags: [],
     attributes: [],
     metaTitle: "",
@@ -143,6 +168,10 @@ function AdminProducts() {
     }
   }
 
+  const getTax = useServerFn(getTaxPublic);
+  const getShipClasses = useServerFn(getShippingClassesPublic);
+  const [taxClasses, setTaxClasses] = useState<TaxClass[]>([{ id: "standard", name: "Standard" }]);
+  const [shippingClasses, setShippingClasses] = useState<ShippingClass[]>([]);
   const [products, setProducts] = useState<Row[]>([]);
   const [categories, setCategories] = useState<Cat[]>([]);
   const [media, setMedia] = useState<Media[]>([]);
@@ -166,6 +195,12 @@ function AdminProducts() {
       .catch(() => {});
     listMedia()
       .then((d) => setMedia((d as Media[]).map((m) => ({ id: m.id, name: m.name, url: m.url }))))
+      .catch(() => {});
+    getTax()
+      .then((t) => { if (t.classes?.length) setTaxClasses(t.classes); })
+      .catch(() => {});
+    getShipClasses()
+      .then((s) => setShippingClasses(s.classes ?? []))
       .catch(() => {});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -200,11 +235,18 @@ function AdminProducts() {
           isBest: form.isBest,
           isNew: form.isNew,
           active: form.active,
-          variants: form.variants.map((v) => ({ id: v.id, label: v.label, price: v.price, stock: v.stock })),
+          variants: form.variants.map((v) => ({ id: v.id, label: v.label, price: v.price, stock: v.stock, sku: v.sku || undefined, attributes: (v.attributes ?? []).filter((a) => a.name.trim() || a.value.trim()) })),
           tags: form.tags,
           attributes: form.attributes.filter((a) => a.name.trim() || a.value.trim()).map((a) => ({ name: a.name.trim(), value: a.value.trim() })),
           sku: form.sku || undefined,
           brand: form.brand || undefined,
+          taxClass: form.taxClass || "standard",
+          shippingClass: form.shippingClass || "",
+          lowStockThreshold: form.lowStockThreshold || 0,
+          isDigital: form.isDigital,
+          downloadUrl: form.downloadUrl || "",
+          noindex: form.noindex,
+          focusKeyword: form.focusKeyword || undefined,
           metaTitle: form.metaTitle || undefined,
           metaDescription: form.metaDescription || undefined,
           ogImage: form.ogImage || undefined,
@@ -309,6 +351,8 @@ function AdminProducts() {
             initial={editing}
             categories={categories}
             media={media}
+            taxClasses={taxClasses}
+            shippingClasses={shippingClasses}
             onCancel={() => setEditing(null)}
             onSave={onSave}
           />
@@ -318,20 +362,52 @@ function AdminProducts() {
   );
 }
 
-function ProductForm({ initial, categories, media, onCancel, onSave }: {
+function ProductForm({ initial, categories, media, taxClasses, shippingClasses, onCancel, onSave }: {
   initial: FormState;
   categories: Cat[];
   media: Media[];
+  taxClasses: TaxClass[];
+  shippingClasses: ShippingClass[];
   onCancel: () => void;
   onSave: (p: FormState) => void;
 }) {
   const [p, setP] = useState<FormState>(initial);
   const set = <K extends keyof FormState>(k: K, v: FormState[K]) => setP((prev) => ({ ...prev, [k]: v }));
+  const genDesc = useServerFn(aiGenerateDescription);
+  const genMeta = useServerFn(aiGenerateMeta);
 
   const setVariant = (idx: number, patch: Partial<FormVariant>) =>
     setP((prev) => ({ ...prev, variants: prev.variants.map((v, i) => (i === idx ? { ...v, ...patch } : v)) }));
-  const addVariant = () => setP((prev) => ({ ...prev, variants: [...prev.variants, { label: "", price: prev.price, stock: 0 }] }));
+  const addVariant = () => setP((prev) => ({ ...prev, variants: [...prev.variants, { label: "", price: prev.price, stock: 0, sku: "", attributes: [] }] }));
   const removeVariant = (idx: number) => setP((prev) => ({ ...prev, variants: prev.variants.filter((_, i) => i !== idx) }));
+
+  // Variation matrix builder: attribute lines like {name:"Size", values:["S","M"]}.
+  const [axes, setAxes] = useState<{ name: string; values: string }[]>([{ name: "", values: "" }]);
+  const setAxis = (i: number, patch: Partial<{ name: string; values: string }>) => setAxes((prev) => prev.map((a, idx) => (idx === i ? { ...a, ...patch } : a)));
+  const addAxis = () => setAxes((prev) => [...prev, { name: "", values: "" }]);
+  const removeAxis = (i: number) => setAxes((prev) => prev.filter((_, idx) => idx !== i));
+  function generateMatrix() {
+    const clean = axes
+      .map((a) => ({ name: a.name.trim(), values: a.values.split(",").map((v) => v.trim()).filter(Boolean) }))
+      .filter((a) => a.name && a.values.length);
+    if (clean.length === 0) { toast.error("Add at least one attribute with values (e.g. Size: S, M, L)."); return; }
+    // Cartesian product of all axis values.
+    let combos: { name: string; value: string }[][] = [[]];
+    for (const axis of clean) {
+      const next: { name: string; value: string }[][] = [];
+      for (const combo of combos) for (const val of axis.values) next.push([...combo, { name: axis.name, value: val }]);
+      combos = next;
+    }
+    const newVariants: FormVariant[] = combos.map((attrs) => ({
+      label: attrs.map((a) => a.value).join(" / "),
+      price: p.price,
+      stock: 0,
+      sku: "",
+      attributes: attrs,
+    }));
+    setP((prev) => ({ ...prev, variants: newVariants }));
+    toast.success(`Generated ${newVariants.length} variation${newVariants.length === 1 ? "" : "s"}.`);
+  }
 
   const setAttribute = (idx: number, patch: Partial<FormAttribute>) =>
     setP((prev) => ({ ...prev, attributes: prev.attributes.map((a, i) => (i === idx ? { ...a, ...patch } : a)) }));
@@ -361,6 +437,25 @@ function ProductForm({ initial, categories, media, onCancel, onSave }: {
       </SelectField>
       <TextField label="SKU" value={p.sku} onChange={(e) => set("sku", e.target.value)} placeholder="e.g. RXP-001" />
       <TextField label="Brand" value={p.brand} onChange={(e) => set("brand", e.target.value)} placeholder="e.g. Acme" />
+      <SelectField label="Tax class" value={p.taxClass} onChange={(e) => set("taxClass", e.target.value)}>
+        {taxClasses.map((c) => <option key={c.id} value={c.id}>{c.name}</option>)}
+      </SelectField>
+      <SelectField label="Shipping class" value={p.shippingClass} onChange={(e) => set("shippingClass", e.target.value)}>
+        <option value="">None</option>
+        {shippingClasses.map((c) => <option key={c.id} value={c.id}>{c.name} (+{formatBDT(c.fee)})</option>)}
+      </SelectField>
+      <TextField label="Low-stock threshold" type="number" value={p.lowStockThreshold || ""} onChange={(e) => set("lowStockThreshold", Number(e.target.value) || 0)} placeholder="0 = use global" />
+
+      <div className="md:col-span-2 rounded-lg border bg-muted/30 p-3">
+        <label className="flex items-center gap-2 text-sm font-medium"><input type="checkbox" checked={p.isDigital} onChange={(e) => set("isDigital", e.target.checked)} /> Digital product (no shipping)</label>
+        {p.isDigital && (
+          <div className="mt-3 grid gap-3">
+            <p className="text-xs text-muted-foreground">Digital products skip shipping. On paid orders, available license keys (managed in <strong>Digital Delivery</strong>) are auto-assigned to the buyer. An optional download link is shown to buyers who purchased it.</p>
+            <TextField label="Download URL (optional)" value={p.downloadUrl} onChange={(e) => set("downloadUrl", e.target.value)} placeholder="https://… or /media/…" />
+          </div>
+        )}
+      </div>
+
       <TextField label="Price (৳)" type="number" required value={p.price || ""} onChange={(e) => set("price", Number(e.target.value))} />
       <TextField label="Compare-at (optional)" type="number" value={p.compareAt ?? ""} onChange={(e) => set("compareAt", e.target.value ? Number(e.target.value) : null)} />
       <TextField label="Stock" type="number" value={p.stock} onChange={(e) => set("stock", Number(e.target.value))} />
@@ -369,7 +464,10 @@ function ProductForm({ initial, categories, media, onCancel, onSave }: {
       <TextField label="Tags (comma sep)" value={p.tags.join(", ")} onChange={(e) => set("tags", e.target.value.split(",").map((s) => s.trim()).filter(Boolean))} placeholder="organic, imported" />
 
       <div className="md:col-span-2">
-        <label className="block text-sm font-medium mb-1.5">Description</label>
+        <div className="flex items-center justify-between mb-1.5">
+          <label className="block text-sm font-medium">Description</label>
+          <AiButton label="Generate with AI" run={async () => (await genDesc({ data: { name: p.name, category: p.category, attributes: p.attributes.map((a) => `${a.name}: ${a.value}`).join(", ") } })).text} onText={(t) => set("description", t)} />
+        </div>
         <RichTextEditor value={p.description} onChange={(html) => set("description", html)} />
       </div>
 
@@ -393,6 +491,32 @@ function ProductForm({ initial, categories, media, onCancel, onSave }: {
             <Plus className="h-3.5 w-3.5" /> Add variant
           </button>
         </div>
+
+        {/* Variation matrix builder */}
+        <div className="border rounded-lg p-3 bg-muted/30 mb-3">
+          <p className="text-[11px] font-semibold text-muted-foreground uppercase tracking-wide mb-2 flex items-center gap-1"><Grid3x3 className="h-3.5 w-3.5" /> Variation matrix — generate all combinations</p>
+          <div className="space-y-2">
+            {axes.map((a, i) => (
+              <div key={i} className="flex flex-wrap items-end gap-2">
+                <label className="w-40">
+                  <span className="text-[10px] font-semibold text-muted-foreground uppercase">Attribute</span>
+                  <input value={a.name} onChange={(e) => setAxis(i, { name: e.target.value })} className="mt-1 w-full border rounded-md px-2 py-1.5 text-sm" placeholder="Size" />
+                </label>
+                <label className="flex-1 min-w-[160px]">
+                  <span className="text-[10px] font-semibold text-muted-foreground uppercase">Values (comma-separated)</span>
+                  <input value={a.values} onChange={(e) => setAxis(i, { values: e.target.value })} className="mt-1 w-full border rounded-md px-2 py-1.5 text-sm" placeholder="S, M, L, XL" />
+                </label>
+                {axes.length > 1 && <button type="button" onClick={() => removeAxis(i)} className="p-1.5 hover:bg-background rounded text-destructive"><X className="h-4 w-4" /></button>}
+              </div>
+            ))}
+          </div>
+          <div className="flex items-center gap-3 mt-2">
+            <button type="button" onClick={addAxis} className="text-xs font-semibold text-primary inline-flex items-center gap-1"><Plus className="h-3.5 w-3.5" /> Add attribute</button>
+            <button type="button" onClick={generateMatrix} className="text-xs font-semibold bg-primary text-primary-foreground px-3 py-1.5 rounded-md">Generate variations</button>
+            <span className="text-[11px] text-muted-foreground">Overwrites the variant list below.</span>
+          </div>
+        </div>
+
         {p.variants.length === 0 && <p className="text-xs text-muted-foreground">No variants. Base price/stock will be used.</p>}
         <div className="space-y-2">
           {p.variants.map((v, i) => (
@@ -405,9 +529,13 @@ function ProductForm({ initial, categories, media, onCancel, onSave }: {
                 <span className="text-[10px] font-semibold text-muted-foreground uppercase">Price</span>
                 <input type="number" value={v.price || ""} onChange={(e) => setVariant(i, { price: Number(e.target.value) })} className="mt-1 w-full border rounded-md px-2 py-1.5 text-sm" />
               </label>
-              <label className="w-24">
+              <label className="w-20">
                 <span className="text-[10px] font-semibold text-muted-foreground uppercase">Stock</span>
                 <input type="number" value={v.stock} onChange={(e) => setVariant(i, { stock: Number(e.target.value) })} className="mt-1 w-full border rounded-md px-2 py-1.5 text-sm" />
+              </label>
+              <label className="w-28">
+                <span className="text-[10px] font-semibold text-muted-foreground uppercase">SKU</span>
+                <input value={v.sku ?? ""} onChange={(e) => setVariant(i, { sku: e.target.value })} className="mt-1 w-full border rounded-md px-2 py-1.5 text-sm" placeholder="opt." />
               </label>
               <button type="button" onClick={() => removeVariant(i)} className="p-1.5 hover:bg-muted rounded text-destructive"><X className="h-4 w-4" /></button>
             </div>
@@ -441,10 +569,15 @@ function ProductForm({ initial, categories, media, onCancel, onSave }: {
       </div>
 
       <div className="md:col-span-2">
-        <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide mb-2">SEO</p>
+        <div className="flex items-center justify-between mb-2">
+          <p className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">SEO</p>
+          <AiButton label="AI meta" run={async () => { const r = await genMeta({ data: { title: p.name, content: p.description.replace(/<[^>]*>/g, " ").slice(0, 1500), focusKeyword: p.focusKeyword } }); setP((prev) => ({ ...prev, metaTitle: r.metaTitle || prev.metaTitle, metaDescription: r.metaDescription || prev.metaDescription })); toast.success("AI meta filled"); return ""; }} />
+        </div>
         <div className="grid md:grid-cols-2 gap-4">
+          <TextField label="Focus keyphrase" value={p.focusKeyword} onChange={(e) => set("focusKeyword", e.target.value)} placeholder="e.g. fresh hilsa fish" />
           <TextField label="Meta title" value={p.metaTitle} onChange={(e) => set("metaTitle", e.target.value)} />
           <TextField label="OG image URL" value={p.ogImage} onChange={(e) => set("ogImage", e.target.value)} placeholder="/uploads/..." />
+          <label className="flex items-center gap-2 text-sm mt-6"><input type="checkbox" checked={p.noindex} onChange={(e) => set("noindex", e.target.checked)} /> Noindex (hide from search engines)</label>
           <div className="md:col-span-2">
             <TextArea label="Meta description" rows={2} value={p.metaDescription} onChange={(e) => set("metaDescription", e.target.value)} />
           </div>

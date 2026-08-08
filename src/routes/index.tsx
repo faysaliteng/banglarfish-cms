@@ -48,9 +48,11 @@ function Home() {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
     try {
-      await subscribe({ data: { email: String(fd.get("email") ?? "").trim() } });
+      const res = await subscribe({ data: { email: String(fd.get("email") ?? "").trim() } });
       (e.target as HTMLFormElement).reset();
-      toast.success("Subscribed! Check your inbox for a welcome discount.");
+      if (res.issued && res.code) toast.success(`Subscribed! Your 10% code ${res.code} is on its way to your inbox.`);
+      else if (res.issued) toast.success("Subscribed! Check your inbox for your 10% welcome coupon.");
+      else toast.success("You're already subscribed — thanks!");
     } catch {
       toast.error("Could not subscribe. Try again.");
     }

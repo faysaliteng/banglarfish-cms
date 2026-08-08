@@ -1,0 +1,146 @@
+#!/usr/bin/env bash
+# Banglarfish operator CLI — day-2 ops for the self-hosted server.
+#
+# Install:  ln -sf /var/www/banglarfish/deploy/banglarfish /usr/local/bin/banglarfish
+# Usage:    banglarfish <command> [args]
+#
+# Env (optional):
+#   APP_DIR       app directory            (default /var/www/banglarfish)
+#   SERVICE       systemd unit             (default banglarfish)
+#   PG_CONTAINER  docker pg container      (default banglarfish-pg)
+#   PGUSER/PGDATABASE  db creds            (default banglarfish/banglarfish)
+#   BASE_URL      health probe base        (default http://127.0.0.1:3000)
+#   BASE_PATH     app sub-path             (default /client1)
+set -euo pipefail
+
+APP_DIR="${APP_DIR:-/var/www/banglarfish}"
+SERVICE="${SERVICE:-banglarfish}"
+PG_CONTAINER="${PG_CONTAINER:-banglarfish-pg}"
+PGUSER="${PGUSER:-banglarfish}"
+PGDATABASE="${PGDATABASE:-banglarfish}"
+
+# Auto-detect PORT / base path from the app's .env (overridable via env).
+_envval() { grep -E "^$1=" "$APP_DIR/.env" 2>/dev/null | head -1 | cut -d= -f2- | tr -d '"'; }
+APP_PORT="${APP_PORT:-$(_envval PORT)}"; APP_PORT="${APP_PORT:-3000}"
+BASE_URL="${BASE_URL:-http://127.0.0.1:$APP_PORT}"
+BASE_PATH="${BASE_PATH:-$(_envval APP_BASE_PATH)}"
+
+psql_exec() { docker exec -i "$PG_CONTAINER" psql -U "$PGUSER" -d "$PGDATABASE" "$@"; }
+
+cmd="${1:-help}"; shift || true
+
+case "$cmd" in
+  status)
+    echo "service: $(systemctl is-active "$SERVICE" 2>/dev/null || echo unknown)"
+    echo -n "health:  "; curl -fsS "$BASE_URL$BASE_PATH/api/health" || echo "(unreachable)"; echo
+    ;;
+
+  health)
+    curl -fsS "$BASE_URL$BASE_PATH/api/health${1:+?token=$1}"; echo
+    ;;
+
+  logs)
+    journalctl -u "$SERVICE" -n "${1:-200}" --no-pager
+    ;;
+
+  cache-clear|restart)
+    # In-memory caches (HTML micro-cache, redirect map, maintenance flag) are
+    # cleared by restarting the process.
+    systemctl restart "$SERVICE"
+    sleep 2
+    echo "restarted; service: $(systemctl is-active "$SERVICE")"
+    ;;
+
+  backup)
+    exec "$APP_DIR/deploy/backup.sh"
+    ;;
+
+  restore)
+    file="${1:-}"
+    [ -z "$file" ] && { echo "usage: banglarfish restore <db-YYYYMMDD-HHMMSS.sql.gz>"; exit 1; }
+    [ -f "$file" ] || { echo "no such file: $file"; exit 1; }
+    read -r -p "This OVERWRITES the '$PGDATABASE' database from $file. Type YES to continue: " ok
+    [ "$ok" = "YES" ] || { echo "aborted"; exit 1; }
+    echo "[restore] restoring…"
+    if [[ "$file" == *.gz ]]; then gunzip -c "$file" | psql_exec; else psql_exec < "$file"; fi
+    echo "[restore] done — consider: banglarfish cache-clear"
+    ;;
+
+  reindex)
+    # Queue a single IndexNow job covering all published product/blog/page URLs.
+    echo "[reindex] enqueuing IndexNow job for published URLs…"
+    psql_exec <<'SQL'
+INSERT INTO jobs (type, payload, status, run_at)
+SELECT 'seo.indexnow', jsonb_build_object('paths', paths), 'pending', now()
+FROM (
+  SELECT jsonb_agg(p) AS paths FROM (
+    SELECT '/product/' || slug AS p FROM products WHERE active = true
+    UNION ALL SELECT '/blog/' || slug FROM blog_posts WHERE status = 'published'
+    UNION ALL SELECT '/' || slug FROM pages WHERE status = 'published'
+  ) u
+) x
+WHERE paths IS NOT NULL;
+SQL
+    echo "[reindex] queued."
+    ;;
+
+  safe-mode)
+    sub="${1:-status}"; shift || true
+    case "$sub" in
+      on)
+        msg="${*:-We are doing some quick maintenance and will be back shortly.}"
+        # -v + :'msg' lets psql quote the value safely (no manual escaping).
+        psql_exec -v msg="$msg" <<'SQL'
+INSERT INTO settings (key, value, updated_at)
+VALUES ('maintenance', jsonb_build_object('enabled', true, 'message', :'msg'), now())
+ON CONFLICT (key) DO UPDATE SET value = jsonb_build_object('enabled', true, 'message', :'msg'), updated_at = now();
+SQL
+        echo "safe-mode: ON (takes effect within ~10s)"
+        ;;
+      off)
+        psql_exec <<'SQL'
+INSERT INTO settings (key, value, updated_at)
+VALUES ('maintenance', jsonb_build_object('enabled', false, 'message', ''), now())
+ON CONFLICT (key) DO UPDATE SET value = jsonb_set(coalesce(settings.value,'{}'::jsonb), '{enabled}', 'false'), updated_at = now();
+SQL
+        echo "safe-mode: OFF (takes effect within ~10s)"
+        ;;
+      *)
+        state="$(psql_exec -tAc "SELECT coalesce((SELECT value->>'enabled' FROM settings WHERE key='maintenance'),'false');" | tr -d '[:space:]')"
+        echo "safe-mode: ${state:-false}"
+        ;;
+    esac
+    ;;
+
+  migrate)
+    file="${1:-}"
+    [ -z "$file" ] && { echo "usage: banglarfish migrate <file.sql>"; exit 1; }
+    [ -f "$file" ] || { echo "no such file: $file"; exit 1; }
+    echo "[migrate] applying $file…"
+    psql_exec -v ON_ERROR_STOP=1 < "$file"
+    echo "[migrate] done."
+    ;;
+
+  psql)
+    docker exec -it "$PG_CONTAINER" psql -U "$PGUSER" -d "$PGDATABASE"
+    ;;
+
+  help|--help|-h|*)
+    cat <<'USAGE'
+Banglarfish operator CLI
+
+  banglarfish status              service + health snapshot
+  banglarfish health [token]      raw /api/health JSON (token = detailed metrics)
+  banglarfish logs [n]            last n journald lines (default 200)
+  banglarfish cache-clear         restart to clear in-memory caches
+  banglarfish backup              run the backup script (db + media)
+  banglarfish restore <file>      restore the DB from a .sql[.gz] dump
+  banglarfish reindex             queue an IndexNow ping for all published URLs
+  banglarfish safe-mode on [msg]  enable maintenance mode (storefront -> 503)
+  banglarfish safe-mode off       disable maintenance mode
+  banglarfish safe-mode           show maintenance state
+  banglarfish migrate <file.sql>  apply a SQL migration (ON_ERROR_STOP)
+  banglarfish psql                open an interactive psql shell
+USAGE
+    ;;
+esac

@@ -21,7 +21,12 @@ export async function getAuthUrl(provider: OAuthProvider, redirectUri: string, s
   }
   if (provider === "facebook") {
     if (!cfg.facebook.enabled || !cfg.facebook.appId) return null;
-    const p = new URLSearchParams({ client_id: cfg.facebook.appId, redirect_uri: redirectUri, response_type: "code", scope: "email public_profile", state });
+    const p = new URLSearchParams({ client_id: cfg.facebook.appId, redirect_uri: redirectUri, response_type: "code", state });
+    // "Facebook Login for Business" apps use a Configuration ID (which carries the
+    // requested permissions) instead of a scope string. Consumer Facebook Login
+    // uses scope=. We support both.
+    if (cfg.facebook.configId && cfg.facebook.configId.trim()) p.set("config_id", cfg.facebook.configId.trim());
+    else p.set("scope", "email public_profile");
     return "https://www.facebook.com/v18.0/dialog/oauth?" + p.toString();
   }
   return null;

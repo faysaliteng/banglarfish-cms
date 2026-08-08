@@ -2,9 +2,11 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { adminListZones, adminUpsertZone, adminDeleteZone } from "@/lib/admin-marketing.functions";
+import { getShippingClassesPublic, adminSaveShippingClasses } from "@/lib/site.functions";
 import type { ShippingZone } from "@/lib/types";
+import type { ShippingClass } from "@/lib/config-types";
 import { formatBDT } from "@/lib/cart";
-import { Plus, Edit, Trash2, Truck } from "lucide-react";
+import { Plus, Edit, Trash2, Truck, Package, Save } from "lucide-react";
 import { Modal, TextField } from "@/components/admin/Modal";
 import { toast } from "sonner";
 
@@ -105,9 +107,51 @@ function ShippingPage() {
         </div>
       </div>
 
+      <ShippingClasses />
+
       <Modal open={!!editing} onClose={() => setEditing(null)} title={editing?.id ? "Edit zone" : "New zone"}>
         {editing && <ZoneForm initial={editing} onCancel={() => setEditing(null)} onSave={onSave} />}
       </Modal>
+    </div>
+  );
+}
+
+function ShippingClasses() {
+  const getFn = useServerFn(getShippingClassesPublic);
+  const saveFn = useServerFn(adminSaveShippingClasses);
+  const [classes, setClasses] = useState<ShippingClass[]>([]);
+  const [saving, setSaving] = useState(false);
+  useEffect(() => { getFn().then((c) => setClasses(c.classes ?? [])).catch(() => {}); }, [getFn]);
+
+  const slug = (s: string) => s.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "class";
+  const update = (id: string, patch: Partial<ShippingClass>) => setClasses((prev) => prev.map((c) => (c.id === id ? { ...c, ...patch } : c)));
+  const add = () => { const name = prompt("Shipping class name (e.g. Heavy, Frozen):"); if (!name) return; const id = slug(name); if (classes.some((c) => c.id === id)) return toast.error("Exists"); setClasses((prev) => [...prev, { id, name, fee: 0 }]); };
+  const remove = (id: string) => setClasses((prev) => prev.filter((c) => c.id !== id));
+  async function save() { setSaving(true); try { await saveFn({ data: { classes } }); toast.success("Shipping classes saved"); } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); } finally { setSaving(false); } }
+
+  return (
+    <div className="mt-8 border rounded-2xl p-5 bg-card max-w-2xl">
+      <div className="flex items-center justify-between mb-1">
+        <h2 className="font-bold flex items-center gap-2"><Package className="h-5 w-5" /> Shipping classes</h2>
+        <div className="flex gap-2">
+          <button onClick={add} className="inline-flex items-center gap-1 text-sm px-3 py-1.5 rounded-md border hover:bg-muted"><Plus className="h-4 w-4" /> Add</button>
+          <button onClick={save} disabled={saving} className="inline-flex items-center gap-1 text-sm px-3 py-1.5 rounded-md bg-primary text-primary-foreground disabled:opacity-60"><Save className="h-4 w-4" /> {saving ? "Saving…" : "Save"}</button>
+        </div>
+      </div>
+      <p className="text-sm text-muted-foreground mb-4">A per-product handling surcharge (e.g. Heavy, Frozen, Fragile). Assign a class to products in the product editor; the fee is added to shipping at checkout.</p>
+      {classes.length === 0 ? (
+        <p className="text-sm text-muted-foreground py-4 text-center">No shipping classes yet.</p>
+      ) : (
+        <div className="space-y-2">
+          {classes.map((c) => (
+            <div key={c.id} className="flex items-center gap-2">
+              <input value={c.name} onChange={(e) => update(c.id, { name: e.target.value })} className="border rounded-md px-3 py-1.5 text-sm flex-1" />
+              <div className="flex items-center gap-1"><span className="text-xs text-muted-foreground">+৳</span><input type="number" value={c.fee} onChange={(e) => update(c.id, { fee: Number(e.target.value) || 0 })} className="border rounded-md px-2 py-1.5 text-sm w-24" /></div>
+              <button onClick={() => remove(c.id)} className="p-1.5 rounded hover:bg-muted text-destructive"><Trash2 className="h-4 w-4" /></button>
+            </div>
+          ))}
+        </div>
+      )}
     </div>
   );
 }

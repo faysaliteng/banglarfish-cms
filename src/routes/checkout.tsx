@@ -1,11 +1,12 @@
 import { createFileRoute, useNavigate, Link } from "@tanstack/react-router";
 import { SiteLayout } from "@/components/site/SiteLayout";
 import { useCart, cart, cartTotals, formatBDT } from "@/lib/cart";
-import { useEffect, useState } from "react";
+import { useEffect, useState, useRef } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { me } from "@/lib/auth.functions";
 import { getProfile } from "@/lib/account.functions";
 import { createOrder } from "@/lib/orders.functions";
+import { captureCheckout } from "@/lib/checkout.functions";
 import { withBase } from "@/lib/base-path";
 import { toast } from "sonner";
 
@@ -24,10 +25,26 @@ function Checkout() {
   const [checkingAuth, setCheckingAuth] = useState(true);
   const [signedIn, setSignedIn] = useState(false);
   const [prefill, setPrefill] = useState<Prefill | null>(null);
+  // Stable idempotency key for this checkout attempt — dedupes double-submits server-side.
+  const idemKeyRef = useRef<string>("");
 
   const fetchMe = useServerFn(me);
   const fetchProfile = useServerFn(getProfile);
   const submitOrder = useServerFn(createOrder);
+  const capture = useServerFn(captureCheckout);
+
+  // Save an in-progress checkout for abandoned-cart recovery (fires when contact entered).
+  function captureNow(e: React.FocusEvent<HTMLInputElement>) {
+    try {
+      const form = e.currentTarget.form;
+      if (!form || lines.length === 0) return;
+      const fd = new FormData(form);
+      const phone = String(fd.get("phone") ?? "").trim();
+      const email = String(fd.get("email") ?? "").trim();
+      if (!phone && !email) return;
+      void capture({ data: { name: String(fd.get("full_name") ?? ""), phone, email, subtotal: totals.subtotal, items: lines.map((l) => ({ name: l.weight ? `${l.name} (${l.weight})` : l.name, qty: l.qty, price: l.price })) } });
+    } catch { /* ignore */ }
+  }
 
   useEffect(() => {
     fetchMe().then(async (user) => {
@@ -58,20 +75,6 @@ function Checkout() {
     return <SiteLayout><div className="container-x py-20 text-center text-sm text-muted-foreground">Loading…</div></SiteLayout>;
   }
 
-  if (!signedIn) {
-    return (
-      <SiteLayout>
-        <div className="container-x py-16 max-w-md mx-auto text-center">
-          <h1 className="text-2xl font-bold mb-3">Sign in to checkout</h1>
-          <p className="text-sm text-muted-foreground mb-6">We need your account to track and deliver your order.</p>
-          <Link to="/auth" search={{ next: "/checkout" }} className="inline-block bg-primary text-primary-foreground rounded-md px-6 py-3 text-sm font-semibold hover:bg-primary/90">
-            Sign in or create account
-          </Link>
-        </div>
-      </SiteLayout>
-    );
-  }
-
   async function place(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     setPlacing(true);
@@ -89,6 +92,9 @@ function Checkout() {
           notes: String(fd.get("notes") ?? "") || null,
           payment_method: String(fd.get("pay") ?? "cod") as "cod" | "bkash" | "nagad" | "card",
           coupon_code: String(fd.get("coupon") ?? "").trim() || null,
+          gift_card_code: String(fd.get("gift_card") ?? "").trim() || null,
+          email: String(fd.get("email") ?? "").trim() || null,
+          idempotency_key: (idemKeyRef.current ||= (globalThis.crypto?.randomUUID?.() ?? `${Date.now()}-${Math.random().toString(36).slice(2)}`)),
           items: lines.map((l) => ({ productId: l.productId, variantId: l.variantId ?? null, weight: l.weight, qty: l.qty })),
         },
       });
@@ -107,9 +113,15 @@ function Checkout() {
         <h1 className="text-3xl font-bold mb-6">Checkout</h1>
         <form onSubmit={place} className="grid lg:grid-cols-[1fr_380px] gap-8">
           <div className="space-y-6">
+            {!signedIn && (
+              <Section title="Contact">
+                <Input name="email" type="email" placeholder="Email * (order updates)" required onBlur={captureNow} />
+                <p className="text-xs text-muted-foreground">Checking out as a guest. <Link to="/auth" search={{ next: "/checkout" }} className="text-primary hover:underline">Sign in</Link> for faster checkout &amp; order history.</p>
+              </Section>
+            )}
             <Section title="Delivery Address">
               <Input name="full_name" placeholder="Full name *" required defaultValue={prefill?.full_name ?? ""} />
-              <Input name="phone" type="tel" placeholder="Phone * (e.g. 017XXXXXXXX)" required defaultValue={prefill?.phone ?? ""} />
+              <Input name="phone" type="tel" placeholder="Phone * (e.g. 017XXXXXXXX)" required defaultValue={prefill?.phone ?? ""} onBlur={captureNow} />
               <Input name="address_line1" placeholder="Street address *" required defaultValue={prefill?.address_line1 ?? ""} />
               <Input name="address_line2" placeholder="Apartment, suite, etc. (optional)" defaultValue={prefill?.address_line2 ?? ""} />
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -140,9 +152,10 @@ function Checkout() {
                 </li>
               ))}
             </ul>
-            <div className="mt-4">
+            <div className="mt-4 space-y-2">
               <input name="coupon" placeholder="Coupon code (optional)" className="w-full border rounded-md px-3 py-2 text-sm uppercase" />
-              <p className="text-[11px] text-muted-foreground mt-1">Discounts are validated and applied when you place the order.</p>
+              <input name="gift_card" placeholder="Gift card code (optional)" className="w-full border rounded-md px-3 py-2 text-sm uppercase" />
+              <p className="text-[11px] text-muted-foreground">Coupons &amp; gift cards are validated and applied when you place the order.</p>
             </div>
             <div className="border-t mt-4 pt-4 space-y-1.5 text-sm">
               <div className="flex justify-between"><span className="text-muted-foreground">Subtotal</span><span>{formatBDT(totals.subtotal)}</span></div>

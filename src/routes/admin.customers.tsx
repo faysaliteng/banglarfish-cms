@@ -2,15 +2,17 @@ import { createFileRoute } from "@tanstack/react-router";
 import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { listAllUsers, adminCreateUser, adminUpdateUser, adminSetUserStatus, adminDeleteUser } from "@/lib/admin-users.functions";
+import { getCustomerGroupsPublic, adminSendSms } from "@/lib/site.functions";
+import type { CustomerGroup } from "@/lib/config-types";
 import { formatBDT } from "@/lib/cart";
-import { Search, Trash2, Users, Pencil, Plus, Ban, CheckCircle2, KeyRound } from "lucide-react";
+import { Search, Trash2, Users, Pencil, Plus, Ban, CheckCircle2, KeyRound, MessageSquare } from "lucide-react";
 import { Modal } from "@/components/admin/Modal";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/admin/customers")({ component: CustomersPage });
 
-type Role = "customer" | "staff" | "manager" | "admin";
-const ROLES: Role[] = ["customer", "staff", "manager", "admin"];
+type Role = "customer" | "support" | "staff" | "manager" | "admin";
+const ROLES: Role[] = ["customer", "support", "staff", "manager", "admin"];
 
 type Row = {
   id: string;
@@ -25,6 +27,7 @@ type Row = {
   created_at: string;
   roles: string[];
   status: string;
+  customer_group: string;
   orders: number;
   spent: number;
 };
@@ -38,6 +41,7 @@ const ROLE_BADGE: Record<Role, string> = {
   admin: "bg-amber-100 text-amber-700",
   manager: "bg-purple-100 text-purple-700",
   staff: "bg-sky-100 text-sky-700",
+  support: "bg-teal-100 text-teal-700",
   customer: "bg-blue-100 text-blue-700",
 };
 
@@ -54,6 +58,13 @@ function CustomersPage() {
   const [editing, setEditing] = useState<Row | null>(null);
   const [creating, setCreating] = useState(false);
   const [pwUser, setPwUser] = useState<Row | null>(null);
+  const [smsUser, setSmsUser] = useState<Row | null>(null);
+  const [smsText, setSmsText] = useState("");
+  const [smsBusy, setSmsBusy] = useState(false);
+  const sendSmsFn = useServerFn(adminSendSms);
+  const getGroups = useServerFn(getCustomerGroupsPublic);
+  const [groups, setGroups] = useState<CustomerGroup[]>([]);
+  useEffect(() => { getGroups().then((g) => setGroups(g.groups)).catch(() => {}); }, [getGroups]);
 
   const load = () => {
     setLoading(true);
@@ -111,6 +122,7 @@ function CustomersPage() {
           district: String(fd.get("district") ?? "") || undefined,
           postal_code: String(fd.get("postal_code") ?? "") || undefined,
           role: (String(fd.get("role") ?? "customer") as Role),
+          customer_group: String(fd.get("customer_group") ?? ""),
         },
       });
       toast.success("Saved");
@@ -144,6 +156,22 @@ function CustomersPage() {
       load();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Failed");
+    }
+  }
+
+  async function onSendSms(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!smsUser) return;
+    if (!smsText.trim()) return toast.error("Enter a message");
+    setSmsBusy(true);
+    try {
+      const res = await sendSmsFn({ data: { phone: smsUser.phone, message: smsText.trim() } });
+      if (res.ok) { toast.success(`SMS sent to ${smsUser.full_name || smsUser.phone}`); setSmsUser(null); setSmsText(""); }
+      else toast.error(res.error || "Send failed");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed");
+    } finally {
+      setSmsBusy(false);
     }
   }
 
@@ -222,6 +250,7 @@ function CustomersPage() {
                     <td>
                       <div className="flex gap-1">
                         <button onClick={() => setEditing(u)} className="p-1.5 hover:bg-muted rounded text-primary" title="Edit"><Pencil className="h-4 w-4" /></button>
+                        <button onClick={() => { setSmsUser(u); setSmsText(""); }} disabled={!u.phone} className="p-1.5 hover:bg-muted rounded disabled:opacity-30" title={u.phone ? "Send SMS" : "No phone on file"}><MessageSquare className="h-4 w-4" /></button>
                         <button onClick={() => setPwUser(u)} className="p-1.5 hover:bg-muted rounded" title="Reset password"><KeyRound className="h-4 w-4" /></button>
                         <button onClick={() => onToggleStatus(u)} className="p-1.5 hover:bg-muted rounded" title={blocked ? "Unblock" : "Block"}>
                           {blocked ? <CheckCircle2 className="h-4 w-4 text-emerald-600" /> : <Ban className="h-4 w-4 text-amber-600" />}
@@ -265,6 +294,13 @@ function CustomersPage() {
             <F name="email" type="email" label="Email" defaultValue={editing.email} />
             <F name="phone" label="Phone" defaultValue={editing.phone} />
             <RoleSelect defaultValue={topRole(editing.roles)} />
+            <label className="block text-sm">
+              <span className="block mb-1 text-muted-foreground text-xs font-medium">Customer group (B2B)</span>
+              <select name="customer_group" defaultValue={editing.customer_group || ""} className="w-full border rounded-md px-3 py-2 text-sm">
+                <option value="">— None (retail) —</option>
+                {groups.map((g) => <option key={g.id} value={g.id}>{g.name}{g.discountPercent ? ` (−${g.discountPercent}%)` : ""}</option>)}
+              </select>
+            </label>
             <div className="col-span-2"><F name="address_line1" label="Address" defaultValue={editing.address_line1} /></div>
             <div className="col-span-2"><F name="address_line2" label="Address line 2" defaultValue={editing.address_line2 ?? ""} /></div>
             <F name="city" label="City" defaultValue={editing.city} />
@@ -285,6 +321,22 @@ function CustomersPage() {
             <div className="flex justify-end gap-2">
               <button type="button" onClick={() => setPwUser(null)} className="border px-4 py-2 rounded-md">Cancel</button>
               <button className="bg-primary text-primary-foreground px-4 py-2 rounded-md font-semibold">Reset password</button>
+            </div>
+          </form>
+        )}
+      </Modal>
+
+      <Modal open={!!smsUser} onClose={() => setSmsUser(null)} title={smsUser ? `Send SMS to ${smsUser.full_name || smsUser.phone}` : ""}>
+        {smsUser && (
+          <form onSubmit={onSendSms} className="space-y-3 text-sm">
+            <p className="text-xs text-muted-foreground">To: <span className="font-mono">{smsUser.phone || "— no phone —"}</span></p>
+            <textarea value={smsText} onChange={(e) => setSmsText(e.target.value)} rows={4} placeholder="আপনার বার্তা লিখুন… (Bengali or English)" className="w-full border rounded-md px-3 py-2 text-sm" />
+            <div className="flex items-center justify-between gap-2">
+              <span className="text-xs text-muted-foreground">{smsText.length} chars</span>
+              <div className="flex gap-2">
+                <button type="button" onClick={() => setSmsUser(null)} className="border px-4 py-2 rounded-md">Cancel</button>
+                <button disabled={smsBusy} className="bg-primary text-primary-foreground px-4 py-2 rounded-md font-semibold disabled:opacity-60">{smsBusy ? "Sending…" : "Send SMS"}</button>
+              </div>
             </div>
           </form>
         )}

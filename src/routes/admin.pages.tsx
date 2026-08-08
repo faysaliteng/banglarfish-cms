@@ -3,9 +3,10 @@ import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
 import { adminListPages, adminUpsertPage, adminDeletePage } from "@/lib/admin-content.functions";
 import type { CmsPage } from "@/lib/types";
-import { Plus, Edit, Trash2, FileText, ExternalLink, Search } from "lucide-react";
+import { Plus, Edit, Trash2, FileText, ExternalLink, Search, History } from "lucide-react";
 import { Modal, TextField, TextArea, SelectField } from "@/components/admin/Modal";
 import { RichTextEditor } from "@/components/admin/RichTextEditor";
+import { RevisionHistory } from "@/components/admin/RevisionHistory";
 import { toast } from "sonner";
 
 export const Route = createFileRoute("/admin/pages")({ component: PagesPage });
@@ -37,6 +38,7 @@ function PagesPage() {
   const [q, setQ] = useState("");
   const [editing, setEditing] = useState<CmsPage | null>(null);
   const [saving, setSaving] = useState(false);
+  const [revsFor, setRevsFor] = useState<string | undefined>(undefined);
 
   const load = () => {
     setLoading(true);
@@ -68,6 +70,7 @@ function PagesPage() {
           ogImage: p.ogImage || undefined,
           noindex: !!p.noindex,
           template: p.template || "default",
+          faq: (p.faq ?? []).filter((f) => f.q.trim() && f.a.trim()),
           showInHeader: !!p.showInHeader,
           showInFooter: !!p.showInFooter,
           sort: Number.isFinite(p.sort) ? p.sort : 0,
@@ -150,13 +153,21 @@ function PagesPage() {
       </div>
 
       <Modal open={!!editing} onClose={() => setEditing(null)} title={editing?.id ? "Edit page" : "New page"} size="xl">
-        {editing && <PageForm initial={editing} saving={saving} onCancel={() => setEditing(null)} onSave={onSave} />}
+        {editing && <PageForm initial={editing} saving={saving} onCancel={() => setEditing(null)} onSave={onSave} onRevisions={editing.id ? () => setRevsFor(editing.id) : undefined} />}
       </Modal>
+
+      <RevisionHistory
+        open={!!revsFor}
+        onClose={() => setRevsFor(undefined)}
+        entityType="page"
+        entityId={revsFor}
+        onRestored={() => { setEditing(null); load(); }}
+      />
     </div>
   );
 }
 
-function PageForm({ initial, saving, onCancel, onSave }: { initial: CmsPage; saving: boolean; onCancel: () => void; onSave: (p: CmsPage) => void }) {
+function PageForm({ initial, saving, onCancel, onSave, onRevisions }: { initial: CmsPage; saving: boolean; onCancel: () => void; onSave: (p: CmsPage) => void; onRevisions?: () => void }) {
   const [form, setForm] = useState<CmsPage>({ ...empty, ...initial });
   const [body, setBody] = useState<string>(initial.body || "");
 
@@ -194,6 +205,25 @@ function PageForm({ initial, saving, onCancel, onSave }: { initial: CmsPage; sav
         <TextField label="OG image URL" value={form.ogImage || ""} onChange={(e) => set("ogImage", e.target.value)} placeholder="https://…" />
       </div>
 
+      <div className="border-t pt-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-muted-foreground">FAQ</h3>
+            <p className="text-xs text-muted-foreground">Rendered on the page and emitted as FAQPage structured data (rich results in Google).</p>
+          </div>
+          <button type="button" onClick={() => set("faq", [...(form.faq ?? []), { q: "", a: "" }])} className="text-sm font-semibold border rounded-md px-3 py-1.5 hover:bg-muted">+ Add question</button>
+        </div>
+        {(form.faq ?? []).map((item, i) => (
+          <div key={i} className="rounded-lg border p-3 space-y-2 bg-muted/20">
+            <div className="flex items-center gap-2">
+              <input value={item.q} onChange={(e) => set("faq", (form.faq ?? []).map((f, j) => j === i ? { ...f, q: e.target.value } : f))} placeholder="Question" className="flex-1 border rounded-md px-3 py-2 text-sm font-medium" />
+              <button type="button" onClick={() => set("faq", (form.faq ?? []).filter((_, j) => j !== i))} className="text-destructive text-sm px-2 py-1 rounded hover:bg-destructive/10">Remove</button>
+            </div>
+            <textarea value={item.a} onChange={(e) => set("faq", (form.faq ?? []).map((f, j) => j === i ? { ...f, a: e.target.value } : f))} placeholder="Answer" rows={2} className="w-full border rounded-md px-3 py-2 text-sm" />
+          </div>
+        ))}
+      </div>
+
       <div className="border-t pt-4 flex flex-wrap gap-6">
         <label className="flex items-center gap-2 text-sm">
           <input type="checkbox" checked={!!form.showInHeader} onChange={(e) => set("showInHeader", e.target.checked)} className="h-4 w-4 rounded border" />
@@ -210,6 +240,9 @@ function PageForm({ initial, saving, onCancel, onSave }: { initial: CmsPage; sav
       </div>
 
       <div className="flex justify-end gap-2 pt-2 border-t">
+        {onRevisions && (
+          <button type="button" onClick={onRevisions} className="mr-auto inline-flex items-center gap-1.5 px-4 py-2 rounded-md border text-sm hover:bg-muted"><History className="h-4 w-4" /> Revisions</button>
+        )}
         <button type="button" onClick={onCancel} className="px-4 py-2 rounded-md border text-sm">Cancel</button>
         <button type="submit" disabled={saving} className="px-5 py-2 rounded-md bg-primary text-primary-foreground text-sm font-semibold disabled:opacity-60">{saving ? "Saving…" : "Save page"}</button>
       </div>

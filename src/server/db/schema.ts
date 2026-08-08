@@ -11,12 +11,15 @@ import {
   timestamp,
   jsonb,
   real,
+  bigserial,
   uniqueIndex,
   index,
 } from "drizzle-orm/pg-core";
 
 /* ---------- Enums ---------- */
-export const roleEnum = pgEnum("role", ["customer", "staff", "manager", "admin"]);
+// "support" = a restricted role that can ONLY use the email client (no other
+// admin access). Kept outside the staff→admin privilege ladder.
+export const roleEnum = pgEnum("role", ["customer", "support", "staff", "manager", "admin"]);
 export const orderStatusEnum = pgEnum("order_status", [
   "pending",
   "confirmed",
@@ -44,9 +47,13 @@ export const users = pgTable(
     passwordHash: text("password_hash").notNull(),
     fullName: text("full_name").notNull().default(""),
     role: roleEnum("role").notNull().default("customer"),
+    customerGroup: text("customer_group").notNull().default(""), // B2B tiered-pricing group id
     phoneVerified: boolean("phone_verified").notNull().default(false),
     emailVerified: boolean("email_verified").notNull().default(false),
     status: text("status").notNull().default("active"), // active | blocked
+    totpSecret: text("totp_secret"), // base32 TOTP secret (null = 2FA not set up)
+    totpEnabled: boolean("totp_enabled").notNull().default(false),
+    totpRecovery: jsonb("totp_recovery").$type<string[]>(), // hashed one-time recovery codes
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -82,6 +89,40 @@ export const otpCodes = pgTable(
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [index("otp_phone_idx").on(t.phone)],
+);
+
+// One-time email links (password reset, email verification).
+export const emailTokens = pgTable(
+  "email_tokens",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "cascade" }),
+    email: text("email").notNull(),
+    tokenHash: text("token_hash").notNull(), // sha256 of the token in the link
+    purpose: text("purpose").notNull().default("reset"), // reset | verify
+    consumed: boolean("consumed").notNull().default(false),
+    expiresAt: timestamp("expires_at", { withTimezone: true }).notNull(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("email_tokens_hash_idx").on(t.tokenHash)],
+);
+
+// Captured checkouts for abandoned-cart recovery.
+export const abandonedCarts = pgTable(
+  "abandoned_carts",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull().default(""),
+    phone: text("phone").notNull().default(""),
+    email: text("email").notNull().default(""),
+    items: jsonb("items").$type<{ name: string; qty: number; price: number }[]>().notNull().default([]),
+    subtotal: integer("subtotal").notNull().default(0),
+    remindedAt: timestamp("reminded_at", { withTimezone: true }),
+    convertedAt: timestamp("converted_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("abandoned_phone_idx").on(t.phone), index("abandoned_email_idx").on(t.email)],
 );
 
 export const addresses = pgTable(
@@ -149,6 +190,13 @@ export const products = pgTable(
     brand: text("brand"),
     tags: jsonb("tags").$type<string[]>().notNull().default([]),
     attributes: jsonb("attributes").$type<{ name: string; value: string }[]>().notNull().default([]),
+    taxClass: text("tax_class").notNull().default("standard"), // links to a TaxConfig class id
+    shippingClass: text("shipping_class").notNull().default(""), // links to a ShippingClass id (handling surcharge)
+    isDigital: boolean("is_digital").notNull().default(false), // digital product (license key or download)
+    downloadUrl: text("download_url").notNull().default(""), // for downloadable digital products
+    lowStockThreshold: integer("low_stock_threshold").notNull().default(0), // 0 = use global default
+    noindex: boolean("noindex").notNull().default(false), // per-item SEO noindex
+    focusKeyword: text("focus_keyword").notNull().default(""), // Yoast-style focus keyphrase
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
     updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
   },
@@ -163,13 +211,29 @@ export const productVariants = pgTable(
     productId: uuid("product_id")
       .notNull()
       .references(() => products.id, { onDelete: "cascade" }),
-    label: text("label").notNull(), // e.g. "500g", "1kg", "2kg"
+    label: text("label").notNull(), // e.g. "500g", "1kg", "2kg" or "L / Red"
     price: integer("price").notNull().default(0),
     stock: integer("stock").notNull().default(0),
     sku: text("sku"),
     sort: integer("sort").notNull().default(0),
+    attributes: jsonb("attributes").$type<{ name: string; value: string }[]>().notNull().default([]), // multi-axis variation matrix
   },
   (t) => [index("variants_product_idx").on(t.productId)],
+);
+
+// License-key vault for digital products. Keys are assigned to an order on payment.
+export const licenseKeys = pgTable(
+  "license_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    productId: uuid("product_id").notNull().references(() => products.id, { onDelete: "cascade" }),
+    code: text("code").notNull(),
+    orderId: uuid("order_id"),
+    orderNumber: text("order_number"),
+    assignedAt: timestamp("assigned_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("license_keys_product_idx").on(t.productId), index("license_keys_order_idx").on(t.orderId)],
 );
 
 export const inventoryLedger = pgTable("inventory_ledger", {
@@ -209,11 +273,14 @@ export const orders = pgTable(
     tax: integer("tax").notNull().default(0),
     total: integer("total").notNull().default(0),
     couponCode: text("coupon_code"),
+    giftCardCode: text("gift_card_code"),
+    giftCardAmount: integer("gift_card_amount").notNull().default(0),
     trackingNumber: text("tracking_number"),
     courier: text("courier"),
     transactionId: text("transaction_id"),
     fullName: text("full_name").notNull(),
     phone: text("phone").notNull(),
+    email: text("email"),
     addressLine1: text("address_line1").notNull(),
     addressLine2: text("address_line2"),
     city: text("city").notNull(),
@@ -294,6 +361,7 @@ export const pages = pgTable(
     ogImage: text("og_image"),
     noindex: boolean("noindex").notNull().default(false),
     template: text("template").notNull().default("default"),
+    faq: jsonb("faq").$type<{ q: string; a: string }[]>(), // FAQ items -> FAQPage JSON-LD
     sort: integer("sort").notNull().default(0),
     showInHeader: boolean("show_in_header").notNull().default(false),
     showInFooter: boolean("show_in_footer").notNull().default(false),
@@ -317,6 +385,8 @@ export const blogPosts = pgTable(
     metaTitle: text("meta_title"),
     metaDescription: text("meta_description"),
     ogImage: text("og_image"),
+    noindex: boolean("noindex").notNull().default(false),
+    focusKeyword: text("focus_keyword").notNull().default(""),
     status: contentStatusEnum("status").notNull().default("draft"),
     publishedAt: timestamp("published_at", { withTimezone: true }),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
@@ -331,6 +401,9 @@ export const media = pgTable("media", {
   size: text("size").notNull().default(""),
   width: integer("width"),
   height: integer("height"),
+  hash: text("hash"), // sha256 of the original bytes (dedup)
+  alt: text("alt").notNull().default(""), // accessibility / SEO alt text
+  lqip: text("lqip").notNull().default(""), // tiny base64 blur placeholder
   uploadedAt: timestamp("uploaded_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -376,6 +449,7 @@ export const newsletterSubscribers = pgTable(
   {
     id: uuid("id").primaryKey().defaultRandom(),
     email: text("email").notNull(),
+    couponCode: text("coupon_code").notNull().default(""),
     createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
   },
   (t) => [uniqueIndex("newsletter_email_uq").on(t.email)],
@@ -383,12 +457,15 @@ export const newsletterSubscribers = pgTable(
 
 export const auditLog = pgTable("audit_log", {
   id: uuid("id").primaryKey().defaultRandom(),
+  seq: bigserial("seq", { mode: "number" }).notNull(), // monotonic ordering for the hash chain
   actorId: uuid("actor_id").references(() => users.id, { onDelete: "set null" }),
   actorEmail: text("actor_email"),
   action: text("action").notNull(),
   entity: text("entity").notNull().default(""),
   entityId: text("entity_id"),
   meta: jsonb("meta").$type<Record<string, unknown>>(),
+  prevHash: text("prev_hash"), // hash of the previous entry (tamper-evident chain)
+  hash: text("hash"), // sha256(prevHash + canonical(this entry))
   createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
 });
 
@@ -398,6 +475,256 @@ export const settings = pgTable("settings", {
   value: jsonb("value").$type<Record<string, unknown>>().notNull().default({}),
   updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
 });
+
+// 301/302 redirect manager (Yoast-Pro style).
+export const redirects = pgTable(
+  "redirects",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    fromPath: text("from_path").notNull(),
+    toPath: text("to_path").notNull(),
+    code: integer("code").notNull().default(301),
+    active: boolean("active").notNull().default(true),
+    hits: integer("hits").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("redirects_from_uq").on(t.fromPath)],
+);
+
+// 404 monitor — logs not-found paths so admins can create redirects in one click.
+export const notFoundLog = pgTable(
+  "not_found_log",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    path: text("path").notNull(),
+    hits: integer("hits").notNull().default(1),
+    referrer: text("referrer"),
+    lastSeen: timestamp("last_seen", { withTimezone: true }).notNull().defaultNow(),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("not_found_path_uq").on(t.path)],
+);
+
+// Content revision history (WordPress-style) for blog posts and CMS pages.
+export const contentRevisions = pgTable(
+  "content_revisions",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    entityType: text("entity_type").notNull(), // "blog" | "page"
+    entityId: uuid("entity_id").notNull(),
+    title: text("title").notNull().default(""),
+    data: jsonb("data").$type<Record<string, unknown>>().notNull(),
+    authorEmail: text("author_email").notNull().default(""),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("content_rev_entity_idx").on(t.entityType, t.entityId)],
+);
+
+// Blog comments with moderation (pending → approved/rejected).
+export const comments = pgTable(
+  "comments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    postId: uuid("post_id").notNull(),
+    parentId: uuid("parent_id"),
+    authorName: text("author_name").notNull(),
+    authorEmail: text("author_email").notNull().default(""),
+    body: text("body").notNull(),
+    status: reviewStatusEnum("status").notNull().default("pending"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("comments_post_idx").on(t.postId)],
+);
+
+// Contact-form inbox.
+export const contactMessages = pgTable("contact_messages", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  name: text("name").notNull(),
+  email: text("email").notNull(),
+  subject: text("subject").notNull().default(""),
+  message: text("message").notNull(),
+  isRead: boolean("is_read").notNull().default(false),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Drag-and-drop landing pages built with the visual (GrapesJS) editor. Stores
+// the generated HTML + CSS; served full-bleed at /l/<slug>.
+export const landingPages = pgTable(
+  "landing_pages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    slug: text("slug").notNull(),
+    title: text("title").notNull().default("Untitled"),
+    html: text("html").notNull().default(""),
+    css: text("css").notNull().default(""),
+    published: boolean("published").notNull().default(false),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("landing_slug_uq").on(t.slug)],
+);
+
+// Full email client — a record of every outbound (Sent) message and, once
+// inbound receiving is configured, incoming mail (Inbox). Powers /admin/mail.
+export const emailMessages = pgTable(
+  "email_messages",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    folder: text("folder").notNull().default("sent"), // inbox | sent | drafts
+    direction: text("direction").notNull().default("outbound"), // outbound | inbound
+    fromAddr: text("from_addr").notNull().default(""),
+    toAddr: text("to_addr").notNull().default(""),
+    cc: text("cc").notNull().default(""),
+    bcc: text("bcc").notNull().default(""),
+    subject: text("subject").notNull().default(""),
+    html: text("html").notNull().default(""),
+    textBody: text("text_body").notNull().default(""),
+    attachments: jsonb("attachments").$type<{ filename: string; url: string; size?: number }[]>().notNull().default([]),
+    messageId: text("message_id").notNull().default(""),
+    inReplyTo: text("in_reply_to").notNull().default(""),
+    status: text("status").notNull().default("sent"), // sent | failed | received | draft
+    errorText: text("error_text").notNull().default(""),
+    isRead: boolean("is_read").notNull().default(true),
+    category: text("category").notNull().default("manual"), // manual | welcome | passwordReset | orderConfirm | orderStatus | inbound
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("email_folder_idx").on(t.folder), index("email_created_idx").on(t.createdAt)],
+);
+
+// Returns / RMA workflow.
+export const returnRequests = pgTable(
+  "return_requests",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orderId: uuid("order_id").notNull(),
+    orderNumber: text("order_number").notNull(),
+    userId: uuid("user_id").references(() => users.id, { onDelete: "set null" }),
+    reason: text("reason").notNull(),
+    items: jsonb("items").$type<{ name: string; qty: number }[]>().notNull().default([]),
+    status: text("status").notNull().default("requested"), // requested | approved | rejected | refunded
+    adminNote: text("admin_note"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("returns_order_idx").on(t.orderId), index("returns_user_idx").on(t.userId)],
+);
+
+// Dynamic content modeling — user-definable content types + typed entries.
+export const contentTypes = pgTable(
+  "content_types",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    slug: text("slug").notNull(), // e.g. "property", "course", "event"
+    name: text("name").notNull(),
+    namePlural: text("name_plural").notNull().default(""),
+    icon: text("icon").notNull().default("FileText"),
+    fields: jsonb("fields").$type<{ key: string; label: string; type: string; required?: boolean; options?: string[] }[]>().notNull().default([]),
+    hasPublicPage: boolean("has_public_page").notNull().default(true),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("content_types_slug_uq").on(t.slug)],
+);
+
+export const contentEntries = pgTable(
+  "content_entries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    typeId: uuid("type_id").notNull().references(() => contentTypes.id, { onDelete: "cascade" }),
+    typeSlug: text("type_slug").notNull(),
+    slug: text("slug").notNull(),
+    title: text("title").notNull(),
+    status: contentStatusEnum("status").notNull().default("draft"),
+    data: jsonb("data").$type<Record<string, unknown>>().notNull().default({}),
+    metaTitle: text("meta_title"),
+    metaDescription: text("meta_description"),
+    publishedAt: timestamp("published_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("content_entries_type_idx").on(t.typeSlug), uniqueIndex("content_entries_slug_uq").on(t.typeSlug, t.slug)],
+);
+
+// Public API keys (scoped). Only the sha256 hash is stored; the full key is shown once.
+export const apiKeys = pgTable(
+  "api_keys",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    name: text("name").notNull(),
+    prefix: text("prefix").notNull(), // display hint, e.g. "bf_live_ab12…"
+    keyHash: text("key_hash").notNull(),
+    scopes: jsonb("scopes").$type<string[]>().notNull().default([]),
+    active: boolean("active").notNull().default(true),
+    lastUsedAt: timestamp("last_used_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("api_keys_hash_uq").on(t.keyHash)],
+);
+
+// Outbound webhook endpoints + delivery log.
+export const webhookEndpoints = pgTable("webhook_endpoints", {
+  id: uuid("id").primaryKey().defaultRandom(),
+  url: text("url").notNull(),
+  secret: text("secret").notNull(),
+  events: jsonb("events").$type<string[]>().notNull().default([]),
+  active: boolean("active").notNull().default(true),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+export const webhookDeliveries = pgTable(
+  "webhook_deliveries",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    endpointId: uuid("endpoint_id").notNull(),
+    event: text("event").notNull(),
+    status: text("status").notNull().default("pending"), // pending | success | failed
+    responseCode: integer("response_code"),
+    attempts: integer("attempts").notNull().default(0),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("webhook_deliv_ep_idx").on(t.endpointId)],
+);
+
+// Durable job queue — background work with retry/backoff/scheduling (kernel).
+export const jobs = pgTable(
+  "jobs",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    type: text("type").notNull(),
+    payload: jsonb("payload").$type<Record<string, unknown>>().notNull().default({}),
+    status: text("status").notNull().default("pending"), // pending | running | done | failed
+    attempts: integer("attempts").notNull().default(0),
+    maxAttempts: integer("max_attempts").notNull().default(5),
+    runAt: timestamp("run_at", { withTimezone: true }).notNull().defaultNow(),
+    lastError: text("last_error"),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+    updatedAt: timestamp("updated_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [index("jobs_due_idx").on(t.status, t.runAt)],
+);
+
+// Idempotency keys — dedupe double-submitted order creation.
+export const idempotencyKeys = pgTable("idempotency_keys", {
+  key: text("key").primaryKey(),
+  orderId: uuid("order_id").notNull(),
+  orderNumber: text("order_number").notNull(),
+  createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+});
+
+// Gift cards / store credit.
+export const giftCards = pgTable(
+  "gift_cards",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    code: text("code").notNull(),
+    initialBalance: integer("initial_balance").notNull().default(0),
+    balance: integer("balance").notNull().default(0),
+    active: boolean("active").notNull().default(true),
+    note: text("note"),
+    expiresAt: timestamp("expires_at", { withTimezone: true }),
+    createdAt: timestamp("created_at", { withTimezone: true }).notNull().defaultNow(),
+  },
+  (t) => [uniqueIndex("gift_cards_code_uq").on(t.code)],
+);
 
 /* ---------- Analytics / visitors ---------- */
 export const pageViews = pgTable(

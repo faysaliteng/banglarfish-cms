@@ -147,3 +147,42 @@ export const toggleWishlist = createServerFn({ method: "POST" })
     await db.insert(wishlists).values({ userId: user.id, productId: data.productId }).onConflictDoNothing();
     return { inWishlist: true };
   });
+
+/* ---------- Active sessions / device management ---------- */
+export type SessionRow = { id: string; ip: string | null; userAgent: string | null; createdAt: string; expiresAt: string; current: boolean };
+
+export const listMySessions = createServerFn({ method: "GET" }).handler(async (): Promise<SessionRow[]> => {
+  const { requireUser } = await import("@/server/auth/context");
+  const { currentSessionId } = await import("@/server/auth/session");
+  const { db } = await import("@/server/db");
+  const { sessions } = await import("@/server/db/schema");
+  const { eq, desc } = await import("drizzle-orm");
+  const user = await requireUser();
+  const cur = currentSessionId();
+  const rows = await db.select().from(sessions).where(eq(sessions.userId, user.id)).orderBy(desc(sessions.createdAt));
+  return rows.map((s) => ({ id: s.id, ip: s.ip, userAgent: s.userAgent, createdAt: s.createdAt.toISOString(), expiresAt: s.expiresAt.toISOString(), current: s.id === cur }));
+});
+
+export const revokeSession = createServerFn({ method: "POST" })
+  .inputValidator((i: unknown) => z.object({ id: z.string().min(8).max(200) }).parse(i))
+  .handler(async ({ data }): Promise<{ ok: true }> => {
+    const { requireUser } = await import("@/server/auth/context");
+    const { db } = await import("@/server/db");
+    const { sessions } = await import("@/server/db/schema");
+    const { and, eq } = await import("drizzle-orm");
+    const user = await requireUser();
+    await db.delete(sessions).where(and(eq(sessions.id, data.id), eq(sessions.userId, user.id)));
+    return { ok: true };
+  });
+
+export const revokeOtherSessions = createServerFn({ method: "POST" }).handler(async (): Promise<{ ok: true; revoked: number }> => {
+  const { requireUser } = await import("@/server/auth/context");
+  const { currentSessionId } = await import("@/server/auth/session");
+  const { db } = await import("@/server/db");
+  const { sessions } = await import("@/server/db/schema");
+  const { and, eq, ne } = await import("drizzle-orm");
+  const user = await requireUser();
+  const cur = currentSessionId();
+  const del = await db.delete(sessions).where(and(eq(sessions.userId, user.id), cur ? ne(sessions.id, cur) : eq(sessions.userId, user.id))).returning({ id: sessions.id });
+  return { ok: true, revoked: del.length };
+});

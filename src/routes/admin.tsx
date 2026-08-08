@@ -1,5 +1,5 @@
 import { createFileRoute, Link, Outlet, useLocation, useNavigate } from "@tanstack/react-router";
-import { LayoutDashboard, Package, ShoppingCart, Users, Tag, FileText, Settings, Image as ImageIcon, MessageSquare, Ticket, Truck, BarChart3, Home, LogOut, Menu as MenuIcon, X, Newspaper, GalleryHorizontal, ListTree, Palette, Globe, CreditCard, Smartphone, Search, Sparkles, KeyRound, MapPin, ChefHat, Code, BookOpen, Blocks, LayoutTemplate, Rocket, RotateCcw } from "lucide-react";
+import { LayoutDashboard, Package, ShoppingCart, Users, Tag, FileText, Settings, Image as ImageIcon, MessageSquare, Ticket, Truck, BarChart3, Home, LogOut, Menu as MenuIcon, X, Newspaper, GalleryHorizontal, ListTree, Palette, Globe, CreditCard, Smartphone, Search, Sparkles, KeyRound, MapPin, ChefHat, Code, BookOpen, Blocks, LayoutTemplate, Rocket, RotateCcw, ArrowRightLeft, Mail, Receipt, Gift, LineChart, Languages, Cog, Plug, Webhook, Boxes, BadgePercent, ShieldCheck, Activity, Inbox } from "lucide-react";
 import { Logo } from "@/components/site/Logo";
 import { useSession, useIsAdmin, useSignOut } from "@/lib/auth";
 import { useEffect, useState } from "react";
@@ -17,6 +17,7 @@ const navGroups: { label: string; items: { to: string; label: string; icon: type
     items: [
       { to: "/admin", label: "Dashboard", icon: LayoutDashboard, exact: true },
       { to: "/admin/analytics", label: "Analytics", icon: BarChart3 },
+      { to: "/admin/reports", label: "Reports", icon: LineChart },
       { to: "/admin/visitors", label: "Visitors & IPs", icon: Globe },
     ],
   },
@@ -33,8 +34,13 @@ const navGroups: { label: string; items: { to: string; label: string; icon: type
     items: [
       { to: "/admin/orders", label: "Orders", icon: ShoppingCart },
       { to: "/admin/coupons", label: "Coupons", icon: Ticket },
+      { to: "/admin/subscribers", label: "Newsletter Subscribers", icon: Mail },
+      { to: "/admin/promotions", label: "Promotions", icon: BadgePercent },
       { to: "/admin/shipping", label: "Shipping", icon: Truck },
+      { to: "/admin/tax", label: "Tax Engine", icon: Receipt },
       { to: "/admin/delivery", label: "Delivery Areas", icon: MapPin },
+      { to: "/admin/returns", label: "Returns / RMA", icon: RotateCcw },
+      { to: "/admin/giftcards", label: "Gift Cards", icon: Gift },
     ],
   },
   {
@@ -42,12 +48,16 @@ const navGroups: { label: string; items: { to: string; label: string; icon: type
     items: [
       { to: "/admin/homepage", label: "Homepage", icon: Home },
       { to: "/admin/homepage-templates", label: "Homepage Templates", icon: LayoutTemplate },
+      { to: "/admin/landing", label: "Landing Pages (Builder)", icon: LayoutTemplate },
       { to: "/admin/pages", label: "Pages (CMS)", icon: FileText },
+      { to: "/admin/content-types", label: "Content Types", icon: Boxes },
       { to: "/admin/blog", label: "Blog", icon: Newspaper },
       { to: "/admin/recipes", label: "Recipes", icon: ChefHat },
       { to: "/admin/banners", label: "Banners", icon: GalleryHorizontal },
       { to: "/admin/menus", label: "Menus", icon: ListTree },
       { to: "/admin/reviews", label: "Reviews", icon: MessageSquare },
+      { to: "/admin/comments", label: "Comments", icon: MessageSquare },
+      { to: "/admin/contact", label: "Contact Inbox", icon: Mail },
     ],
   },
   {
@@ -63,10 +73,19 @@ const navGroups: { label: string; items: { to: string; label: string; icon: type
     items: [
       { to: "/admin/payments", label: "Payment Gateways", icon: CreditCard },
       { to: "/admin/sms", label: "SMS Gateway", icon: Smartphone },
+      { to: "/admin/email", label: "Email Settings", icon: Mail },
+      { to: "/admin/mail", label: "Email Inbox / Send", icon: Inbox },
+      { to: "/admin/whatsapp", label: "WhatsApp", icon: MessageSquare },
       { to: "/admin/social", label: "Social Login", icon: KeyRound },
       { to: "/admin/seo", label: "SEO Engine", icon: Search },
+      { to: "/admin/ai", label: "AI Assistant", icon: Sparkles },
+      { to: "/admin/languages", label: "Languages", icon: Languages },
+      { to: "/admin/redirects", label: "Redirects", icon: ArrowRightLeft },
       { to: "/admin/modules", label: "Modules", icon: Blocks },
+      { to: "/admin/plugins", label: "Plugins", icon: Plug },
+      { to: "/admin/api", label: "API & Webhooks", icon: Webhook },
       { to: "/admin/customers", label: "Users & Roles", icon: Users },
+      { to: "/admin/customer-groups", label: "Customer Groups", icon: Users },
       { to: "/admin/settings", label: "Settings", icon: Settings },
     ],
   },
@@ -76,6 +95,9 @@ const navGroups: { label: string; items: { to: string; label: string; icon: type
       { to: "/admin/setup", label: "Setup Wizard", icon: Rocket },
       { to: "/admin/starter", label: "Starter Templates", icon: LayoutTemplate },
       { to: "/admin/docs", label: "Help & Docs", icon: BookOpen },
+      { to: "/admin/jobs", label: "Background Jobs", icon: Cog },
+      { to: "/admin/privacy", label: "Privacy & GDPR", icon: ShieldCheck },
+      { to: "/admin/health", label: "System Health", icon: Activity },
       { to: "/admin/reset", label: "Restore Defaults", icon: RotateCcw },
     ],
   },
@@ -86,6 +108,9 @@ function AdminLayout() {
   const nav_ = useNavigate();
   const { user, loading } = useSession();
   const { isAdmin } = useIsAdmin(user);
+  const isSupport = !!user && user.role === "support";
+  // Support users see ONLY the email client.
+  const groups = isSupport ? [{ label: "Email", items: [{ to: "/admin/mail", label: "Email Inbox / Send", icon: Inbox, exact: false }] }] : navGroups;
   const signOut = useSignOut();
   const [drawer, setDrawer] = useState(false);
   const [cmdOpen, setCmdOpen] = useState(false);
@@ -93,6 +118,11 @@ function AdminLayout() {
   useEffect(() => {
     if (!loading && !user) nav_({ to: "/auth", search: { next: loc.pathname } });
   }, [loading, user, loc.pathname, nav_]);
+
+  // Confine support users to the email client — bounce any other admin path.
+  useEffect(() => {
+    if (!loading && isSupport && !loc.pathname.startsWith("/admin/mail")) nav_({ to: "/admin/mail" });
+  }, [loading, isSupport, loc.pathname, nav_]);
 
   // Close the mobile drawer on navigation.
   useEffect(() => setDrawer(false), [loc.pathname]);
@@ -110,17 +140,17 @@ function AdminLayout() {
   }, []);
 
   const commands: Command[] = [
-    ...navGroups.flatMap((g) => g.items.map((it) => ({ label: it.label, group: g.label, icon: it.icon, run: () => nav_({ to: it.to as "/admin" }) }))),
+    ...groups.flatMap((g) => g.items.map((it) => ({ label: it.label, group: g.label, icon: it.icon, run: () => nav_({ to: it.to as "/admin" }) }))),
     { label: "View store", group: "Actions", icon: Home, run: () => nav_({ to: "/" }) },
     { label: "Sign out", group: "Actions", icon: LogOut, run: async () => { await signOut(); nav_({ to: "/" }); } },
   ];
-  const currentItem = navGroups.flatMap((g) => g.items).find((it) => (it.exact ? loc.pathname === it.to : loc.pathname.startsWith(it.to)));
+  const currentItem = groups.flatMap((g) => g.items).find((it) => (it.exact ? loc.pathname === it.to : loc.pathname.startsWith(it.to)));
 
   if (loading) {
     return <div className="min-h-screen grid place-items-center text-sm text-muted-foreground">Loading admin…</div>;
   }
   if (!user) return null;
-  if (!isAdmin) {
+  if (!isAdmin && !isSupport) {
     return (
       <div className="min-h-screen grid place-items-center p-6">
         <div className="max-w-md text-center border rounded-2xl p-8 bg-card">
@@ -142,7 +172,7 @@ function AdminLayout() {
       </div>
       <p className="px-5 pt-3 text-xs text-white/50 truncate">Signed in · {user.email}</p>
       <nav className="p-3 text-sm flex-1 overflow-y-auto">
-        {navGroups.map((group) => (
+        {groups.map((group) => (
           <div key={group.label} className="mb-2">
             <p className="px-3 pt-3 pb-1 text-[10px] font-bold uppercase tracking-wider text-white/35">{group.label}</p>
             <div className="space-y-0.5">
@@ -171,7 +201,7 @@ function AdminLayout() {
   );
 
   return (
-    <div className="min-h-screen bg-muted/30 lg:grid lg:grid-cols-[240px_1fr]">
+    <div className="bf-admin min-h-screen bg-muted/30 lg:grid lg:grid-cols-[240px_1fr]">
       {/* Desktop sidebar */}
       <aside className="hidden lg:flex min-h-screen bg-[oklch(0.16_0.02_250)] text-white/90 sticky top-0 h-screen overflow-y-auto flex-col">
         {sidebar}

@@ -174,6 +174,16 @@ export const getSettings = createServerFn({ method: "GET" }).handler(async (): P
   return { ...defaultSettings, ...((row?.value as Partial<Settings>) ?? {}) };
 });
 
+export const adminListSubscribers = createServerFn({ method: "GET" }).handler(async (): Promise<{ email: string; couponCode: string; createdAt: string }[]> => {
+  const { requireStaff } = await import("@/server/auth/context");
+  await requireStaff();
+  const { db } = await import("@/server/db");
+  const { newsletterSubscribers } = await import("@/server/db/schema");
+  const { desc } = await import("drizzle-orm");
+  const rows = await db.select().from(newsletterSubscribers).orderBy(desc(newsletterSubscribers.createdAt)).limit(5000);
+  return rows.map((r) => ({ email: r.email, couponCode: r.couponCode ?? "", createdAt: (r.createdAt instanceof Date ? r.createdAt : new Date(r.createdAt)).toISOString() }));
+});
+
 export const getPage = createServerFn({ method: "GET" })
   .inputValidator((i: unknown) => z.object({ slug: z.string() }).parse(i))
   .handler(async ({ data }): Promise<CmsPage | null> => {
@@ -186,6 +196,7 @@ export const getPage = createServerFn({ method: "GET" })
       id: row.id, slug: row.slug, title: row.title, body: row.body, status: row.status, updatedAt: row.updatedAt.toISOString().slice(0, 10),
       metaTitle: row.metaTitle ?? undefined, metaDescription: row.metaDescription ?? undefined, ogImage: row.ogImage ?? undefined,
       noindex: row.noindex, template: row.template,
+      faq: (row.faq ?? []).filter((f) => f && f.q && f.a),
     };
   });
 
@@ -209,12 +220,18 @@ export const getMenus = createServerFn({ method: "GET" }).handler(async (): Prom
 async function loadPosts(): Promise<BlogPost[]> {
   const { db } = await import("@/server/db");
   const { blogPosts } = await import("@/server/db/schema");
-  const { desc, eq } = await import("drizzle-orm");
-  const rows = await db.select().from(blogPosts).where(eq(blogPosts.status, "published")).orderBy(desc(blogPosts.publishedAt));
+  const { desc, eq, and, or, isNull, lte } = await import("drizzle-orm");
+  // Scheduled publishing: a post is public only when published AND its date has arrived.
+  const rows = await db
+    .select()
+    .from(blogPosts)
+    .where(and(eq(blogPosts.status, "published"), or(isNull(blogPosts.publishedAt), lte(blogPosts.publishedAt, new Date()))))
+    .orderBy(desc(blogPosts.publishedAt));
   return rows.map((p) => ({
     id: p.id, slug: p.slug, title: p.title, excerpt: p.excerpt, body: p.body, coverImage: p.coverImage,
     author: p.author, category: p.category, tags: p.tags ?? [], status: p.status, publishedAt: p.publishedAt?.toISOString() ?? null,
     metaTitle: p.metaTitle ?? undefined, metaDescription: p.metaDescription ?? undefined, ogImage: p.ogImage ?? undefined,
+    noindex: (p as { noindex?: boolean }).noindex ?? false, focusKeyword: (p as { focusKeyword?: string }).focusKeyword ?? "",
   }));
 }
 
@@ -235,13 +252,18 @@ export const getBlogPost = createServerFn({ method: "GET" })
   .handler(async ({ data }): Promise<BlogPost | null> => {
     const { db } = await import("@/server/db");
     const { blogPosts } = await import("@/server/db/schema");
-    const { and, eq } = await import("drizzle-orm");
-    const [p] = await db.select().from(blogPosts).where(and(eq(blogPosts.slug, data.slug), eq(blogPosts.status, "published"))).limit(1);
+    const { and, eq, or, isNull, lte } = await import("drizzle-orm");
+    const [p] = await db
+      .select()
+      .from(blogPosts)
+      .where(and(eq(blogPosts.slug, data.slug), eq(blogPosts.status, "published"), or(isNull(blogPosts.publishedAt), lte(blogPosts.publishedAt, new Date()))))
+      .limit(1);
     if (!p) return null;
     return {
       id: p.id, slug: p.slug, title: p.title, excerpt: p.excerpt, body: p.body, coverImage: p.coverImage, author: p.author,
       category: p.category, tags: p.tags ?? [], status: p.status, publishedAt: p.publishedAt?.toISOString() ?? null,
       metaTitle: p.metaTitle ?? undefined, metaDescription: p.metaDescription ?? undefined, ogImage: p.ogImage ?? undefined,
+      noindex: (p as { noindex?: boolean }).noindex ?? false, focusKeyword: (p as { focusKeyword?: string }).focusKeyword ?? "",
     };
   });
 
@@ -278,9 +300,40 @@ export const submitReview = createServerFn({ method: "POST" })
 
 export const subscribeNewsletter = createServerFn({ method: "POST" })
   .inputValidator((i: unknown) => z.object({ email: z.string().trim().email().max(255) }).parse(i))
-  .handler(async ({ data }): Promise<{ ok: true }> => {
+  .handler(async ({ data }): Promise<{ ok: true; issued: boolean; code?: string }> => {
+    const email = data.email.toLowerCase();
     const { db } = await import("@/server/db");
-    const { newsletterSubscribers } = await import("@/server/db/schema");
-    await db.insert(newsletterSubscribers).values({ email: data.email.toLowerCase() }).onConflictDoNothing();
-    return { ok: true };
+    const { newsletterSubscribers, coupons } = await import("@/server/db/schema");
+    const { eq } = await import("drizzle-orm");
+    const { randomBytes } = await import("node:crypto");
+
+    // Insert the subscriber; onConflictDoNothing returns no row if already subscribed.
+    const inserted = await db.insert(newsletterSubscribers).values({ email }).onConflictDoNothing().returning({ id: newsletterSubscribers.id });
+    if (inserted.length === 0) return { ok: true, issued: false }; // already subscribed → no new coupon
+
+    // Generate a unique single-use 10% welcome coupon.
+    let code = "";
+    for (let i = 0; i < 20; i++) {
+      const rnd = randomBytes(4).toString("hex").toUpperCase().slice(0, 6);
+      code = `WELCOME10-${rnd}`;
+      const clash = await db.select({ id: coupons.id }).from(coupons).where(eq(coupons.code, code)).limit(1);
+      if (clash.length === 0) break;
+    }
+    const expiresAt = new Date(Date.now() + 60 * 24 * 60 * 60 * 1000); // 60 days
+    try {
+      await db.insert(coupons).values({ code, type: "percent", value: 10, minSubtotal: 0, usageLimit: 1, active: true, expiresAt });
+      await db.update(newsletterSubscribers).set({ couponCode: code }).where(eq(newsletterSubscribers.id, inserted[0].id));
+    } catch (e) {
+      console.error("[newsletter] coupon create failed", e);
+      return { ok: true, issued: false };
+    }
+
+    // Email the code (best-effort).
+    try {
+      const { sendEmailSafe, couponEmail } = await import("@/server/email");
+      const mail = await couponEmail(code, 10);
+      void sendEmailSafe({ ...mail, to: email });
+    } catch { /* email best-effort */ }
+
+    return { ok: true, issued: true, code };
   });

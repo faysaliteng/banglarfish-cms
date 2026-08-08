@@ -21,6 +21,7 @@ function SeoConfigPage() {
 
   if (!cfg) return <p className="text-sm text-muted-foreground">Loading…</p>;
   const set = (patch: Partial<SeoConfig>) => setCfg({ ...cfg, ...patch });
+  const setLb = (patch: Partial<SeoConfig["localBusiness"]>) => setCfg({ ...cfg, localBusiness: { ...cfg.localBusiness, ...patch } });
 
   async function save() {
     if (!cfg) return;
@@ -92,6 +93,63 @@ function SeoConfigPage() {
               <Field label="Bing verification code" value={cfg.bingVerification} onChange={(v) => set({ bingVerification: v })} />
             </div>
             <p className="text-xs text-muted-foreground mt-2">Added as meta tags in the site head so Google/Bing can verify ownership.</p>
+          </Panel>
+
+          <Panel title="robots.txt editor" icon={Globe}>
+            <Area label="Custom robots.txt (leave blank to auto-generate)" value={cfg.robotsTxt ?? ""} onChange={(v) => set({ robotsTxt: v })} rows={6} />
+            <p className="text-xs text-muted-foreground mt-2">Served live at <a href="/robots.txt" target="_blank" rel="noreferrer" className="text-primary underline">/robots.txt</a>. Blank = auto (allow all; block /admin, /cart, /auth). A <code>Sitemap:</code> line is appended automatically. If “discourage indexing” is on above, robots.txt disallows everything.</p>
+          </Panel>
+
+          <Panel title="Breadcrumbs & permalinks" icon={ShieldCheck}>
+            <label className="flex items-center gap-2 text-sm mb-2">
+              <input type="checkbox" checked={cfg.breadcrumbs ?? true} onChange={(e) => set({ breadcrumbs: e.target.checked })} />
+              <span>Emit <strong>breadcrumb</strong> structured data (rich results in Google)</span>
+            </label>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={cfg.trailingSlash ?? false} onChange={(e) => set({ trailingSlash: e.target.checked })} />
+              <span>Permalinks: add a <strong>trailing slash</strong> to URLs</span>
+            </label>
+            <p className="text-xs text-muted-foreground mt-2">URL structure: <code>/product/&#123;slug&#125;</code>, <code>/category/&#123;slug&#125;</code>, <code>/blog/&#123;slug&#125;</code>, <code>/pages/&#123;slug&#125;</code>. Renaming a slug now auto-creates a 301. To move any other URL, use <strong>Redirects</strong> (sidebar).</p>
+          </Panel>
+
+          <Panel title="Per-type title templates" icon={Globe}>
+            <div className="grid gap-3">
+              <Field label="Product title template" hint="%page% = product name, %site% = site name" value={cfg.productTitleTemplate ?? "%page% — %site%"} onChange={(v) => set({ productTitleTemplate: v })} />
+              <Field label="Blog post title template" value={cfg.postTitleTemplate ?? "%page% — %site%"} onChange={(v) => set({ postTitleTemplate: v })} />
+              <Field label="Category title template" value={cfg.categoryTitleTemplate ?? "%page% — %site%"} onChange={(v) => set({ categoryTitleTemplate: v })} />
+            </div>
+          </Panel>
+
+          <Panel title="Sitemaps & IndexNow" icon={Globe}>
+            <p className="text-xs text-muted-foreground mb-3">A sitemap <a href="/sitemap.xml" target="_blank" rel="noreferrer" className="text-primary underline">index</a> links per-type sitemaps (products, posts, pages, categories) with image entries. RSS/Atom at <a href="/feed.xml" target="_blank" rel="noreferrer" className="text-primary underline">/feed.xml</a>.</p>
+            <label className="flex items-center gap-2 text-sm">
+              <input type="checkbox" checked={cfg.indexNow ?? false} onChange={(e) => set({ indexNow: e.target.checked })} />
+              <span>Enable <strong>IndexNow</strong> — instantly notify Bing/Yandex when you publish or update content</span>
+            </label>
+            {cfg.indexNowKey && <p className="text-[11px] text-muted-foreground mt-2">Key file: <code>/{cfg.indexNowKey}.txt</code> (auto-generated & served). Google discovers via the sitemap.</p>}
+          </Panel>
+
+          <Panel title="Local SEO (LocalBusiness schema)" icon={ShieldCheck}>
+            <label className="flex items-center gap-2 text-sm mb-3">
+              <input type="checkbox" checked={cfg.localBusiness?.enabled ?? false} onChange={(e) => setLb({ enabled: e.target.checked })} />
+              <span>Emit <strong>LocalBusiness</strong> structured data (Google Business / map rich results)</span>
+            </label>
+            {cfg.localBusiness?.enabled && (
+              <div className="grid sm:grid-cols-2 gap-3">
+                <Field label="Business type" hint="Store / Restaurant / LocalBusiness" value={cfg.localBusiness.type} onChange={(v) => setLb({ type: v })} />
+                <Field label="Business name" value={cfg.localBusiness.name} onChange={(v) => setLb({ name: v })} />
+                <Field label="Phone" value={cfg.localBusiness.phone} onChange={(v) => setLb({ phone: v })} />
+                <Field label="Price range" value={cfg.localBusiness.priceRange} onChange={(v) => setLb({ priceRange: v })} />
+                <Field label="Street" value={cfg.localBusiness.street} onChange={(v) => setLb({ street: v })} />
+                <Field label="City" value={cfg.localBusiness.city} onChange={(v) => setLb({ city: v })} />
+                <Field label="Region/State" value={cfg.localBusiness.region} onChange={(v) => setLb({ region: v })} />
+                <Field label="Postal code" value={cfg.localBusiness.postalCode} onChange={(v) => setLb({ postalCode: v })} />
+                <Field label="Country (ISO-2)" value={cfg.localBusiness.country} onChange={(v) => setLb({ country: v })} />
+                <Field label="Opening hours" hint="e.g. Mo-Su 09:00-21:00" value={cfg.localBusiness.hours} onChange={(v) => setLb({ hours: v })} />
+                <Field label="Latitude" value={cfg.localBusiness.lat} onChange={(v) => setLb({ lat: v })} />
+                <Field label="Longitude" value={cfg.localBusiness.lng} onChange={(v) => setLb({ lng: v })} />
+              </div>
+            )}
           </Panel>
         </div>
 

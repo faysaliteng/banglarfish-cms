@@ -15,11 +15,14 @@ import appCss from "../styles.css?url";
 import { reportError } from "../lib/error-reporting";
 import { ThemeStyle } from "../components/site/ThemeStyle";
 import { CustomCode } from "../components/site/CustomCode";
+import { Toaster } from "../components/ui/sonner";
+import { CookieConsent } from "../components/site/CookieConsent";
 import { getTheme } from "@/lib/theme.functions";
-import { getSeo, getBranding, getCustomCodePublic } from "@/lib/site.functions";
+import { getSeo, getBranding, getCustomCodePublic, getI18nState } from "@/lib/site.functions";
 import { getSettings } from "@/lib/catalog.functions";
 import { setCurrency } from "@/lib/cart";
 import { recordPageView } from "@/lib/analytics.functions";
+import { recordNotFound } from "@/lib/redirects.functions";
 
 function VisitorTracker() {
   const record = useServerFn(recordPageView);
@@ -33,6 +36,12 @@ function VisitorTracker() {
 }
 
 function NotFoundComponent() {
+  const record = useServerFn(recordNotFound);
+  const pathname = useRouterState({ select: (s) => s.location.pathname });
+  useEffect(() => {
+    if (typeof document === "undefined") return;
+    record({ data: { path: pathname, referrer: document.referrer || null } }).catch(() => {});
+  }, [pathname, record]);
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <div className="max-w-md text-center">
@@ -94,9 +103,9 @@ function ErrorComponent({ error, reset }: { error: Error; reset: () => void }) {
 
 export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()({
   loader: async () => {
-    const [theme, seo, branding, customCode, settings] = await Promise.all([getTheme(), getSeo(), getBranding(), getCustomCodePublic(), getSettings()]);
+    const [theme, seo, branding, customCode, settings, i18n] = await Promise.all([getTheme(), getSeo(), getBranding(), getCustomCodePublic(), getSettings(), getI18nState()]);
     const siteUrl = (process.env.APP_URL || "").replace(/\/+$/, "");
-    return { theme, seo, branding, customCode, settings, siteUrl };
+    return { theme, seo, branding, customCode, settings, siteUrl, i18n };
   },
   head: ({ loaderData }) => ({
     meta: [
@@ -121,6 +130,13 @@ export const Route = createRootRouteWithContext<{ queryClient: QueryClient }>()(
       { rel: "preconnect", href: "https://fonts.googleapis.com" },
       { rel: "preconnect", href: "https://fonts.gstatic.com", crossOrigin: "anonymous" },
       { rel: "stylesheet", href: "https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=Inter:wght@400;500;600;700&family=Manrope:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@400;500;600;700;800&family=Montserrat:wght@400;500;600;700;800&family=Space+Grotesk:wght@400;500;600;700&family=Playfair+Display:wght@500;600;700;800&family=Hind+Siliguri:wght@400;500;600;700&display=swap" },
+      // hreflang alternates for multi-language stores.
+      ...((loaderData?.i18n?.enabled && loaderData.i18n.languages.length > 1 && loaderData?.siteUrl)
+        ? [
+            ...loaderData.i18n.languages.map((l) => ({ rel: "alternate", hrefLang: l.code, href: `${loaderData.siteUrl}/?lang=${l.code}` })),
+            { rel: "alternate", hrefLang: "x-default", href: `${loaderData.siteUrl}/` },
+          ]
+        : []),
     ],
   }),
   shellComponent: RootShell,
@@ -145,25 +161,29 @@ function RootShell({ children }: { children: ReactNode }) {
 
 function RootComponent() {
   const { queryClient } = Route.useRouteContext();
-  const { theme, seo, customCode, settings, siteUrl } = Route.useLoaderData();
+  const { theme, seo, customCode, settings, siteUrl, i18n } = Route.useLoaderData();
   // Apply the store currency site-wide (runs on both server render + client).
   setCurrency({ code: settings?.currency, symbol: settings?.currencySymbol, position: settings?.currencyPosition, decimals: settings?.currencyDecimals, thousandSep: settings?.currencyThousandSep });
   const siteCss = (customCode?.css ?? "").replace(/<\s*\//g, "").slice(0, 50000);
 
+  const lb = seo.localBusiness;
   const orgLd = {
     "@context": "https://schema.org",
     "@graph": [
       {
         "@type": "Organization",
+        "@id": `${siteUrl}/#organization`,
         name: seo.organizationName || seo.siteName,
         url: siteUrl || undefined,
-        logo: seo.organizationLogo || undefined,
+        logo: seo.organizationLogo ? { "@type": "ImageObject", url: seo.organizationLogo } : undefined,
         sameAs: seo.socialProfiles,
       },
       {
         "@type": "WebSite",
+        "@id": `${siteUrl}/#website`,
         name: seo.siteName,
         url: siteUrl || undefined,
+        publisher: { "@id": `${siteUrl}/#organization` },
         ...(siteUrl
           ? {
               potentialAction: {
@@ -174,11 +194,28 @@ function RootComponent() {
             }
           : {}),
       },
+      ...(lb?.enabled
+        ? [{
+            "@type": lb.type || "Store",
+            "@id": `${siteUrl}/#localbusiness`,
+            name: lb.name || seo.siteName,
+            url: siteUrl || undefined,
+            image: seo.organizationLogo || undefined,
+            telephone: lb.phone || undefined,
+            priceRange: lb.priceRange || undefined,
+            parentOrganization: { "@id": `${siteUrl}/#organization` },
+            address: { "@type": "PostalAddress", streetAddress: lb.street || undefined, addressLocality: lb.city || undefined, addressRegion: lb.region || undefined, postalCode: lb.postalCode || undefined, addressCountry: lb.country || undefined },
+            ...(lb.lat && lb.lng ? { geo: { "@type": "GeoCoordinates", latitude: lb.lat, longitude: lb.lng } } : {}),
+            ...(lb.hours ? { openingHours: lb.hours } : {}),
+          }]
+        : []),
     ],
   };
 
   return (
     <QueryClientProvider client={queryClient}>
+      <Toaster richColors closeButton position="top-center" />
+      <CookieConsent />
       <ThemeStyle theme={theme} />
       {siteCss && <style id="bf-site-css" dangerouslySetInnerHTML={{ __html: siteCss }} />}
       {customCode && <CustomCode headHtml={customCode.headHtml} bodyEnd={customCode.bodyEnd} />}
@@ -187,6 +224,8 @@ function RootComponent() {
       {/* #bf-root carries the surface/layout/effect data-attributes the theme CSS keys off. */}
       <div
         id="bf-root"
+        lang={i18n?.lang || "en"}
+        dir={i18n?.dir === "rtl" ? "rtl" : "ltr"}
         data-surface={theme.surface}
         data-hero={theme.hero}
         data-bg={theme.bg}

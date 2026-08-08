@@ -8,6 +8,7 @@ import { useEffect, useState } from "react";
 import { z } from "zod";
 import { toast } from "sonner";
 import { withBase } from "@/lib/base-path";
+import { Eye, EyeOff } from "lucide-react";
 
 // Signup collects identity + a mandatory phone (kept unverified — the customer
 // can verify by SMS later). Delivery address is collected right after, at
@@ -51,6 +52,8 @@ function AuthPage() {
   const qc = useQueryClient();
   const [tab, setTab] = useState<"login" | "signup">("login");
   const [busy, setBusy] = useState(false);
+  const [twoFA, setTwoFA] = useState<{ email: string; password: string } | null>(null);
+  const [twoFACode, setTwoFACode] = useState("");
   const dest = safePath(next);
 
   const doLogin = useServerFn(login);
@@ -62,18 +65,43 @@ function AuthPage() {
     if (error) toast.error(OAUTH_ERRORS[error] ?? "Sign-in failed. Please try again.");
   }, [error]);
 
+  function finishLogin(user: { role: string }) {
+    qc.setQueryData(["me"], user);
+    toast.success("Welcome back!");
+    const isStaff = ["staff", "manager", "admin"].includes(user.role);
+    window.location.href = withBase(dest === "/account" && isStaff ? "/admin" : dest);
+  }
+
   async function onLogin(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     const fd = new FormData(e.currentTarget);
+    const email = String(fd.get("email") ?? "").trim();
+    const password = String(fd.get("password") ?? "");
     setBusy(true);
     try {
-      const user = await doLogin({ data: { email: String(fd.get("email") ?? "").trim(), password: String(fd.get("password") ?? "") } });
-      qc.setQueryData(["me"], user);
-      toast.success("Welcome back!");
-      const isStaff = ["staff", "manager", "admin"].includes(user.role);
-      window.location.href = withBase(dest === "/account" && isStaff ? "/admin" : dest);
+      const res = await doLogin({ data: { email, password } });
+      if (res && "twoFactorRequired" in res) {
+        setTwoFA({ email, password });
+        setBusy(false);
+        return;
+      }
+      finishLogin(res);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Sign in failed");
+      setBusy(false);
+    }
+  }
+
+  async function onVerify2FA(e: React.FormEvent<HTMLFormElement>) {
+    e.preventDefault();
+    if (!twoFA) return;
+    setBusy(true);
+    try {
+      const res = await doLogin({ data: { email: twoFA.email, password: twoFA.password, code: twoFACode.trim() } });
+      if (res && "twoFactorRequired" in res) { toast.error("Enter your 6-digit code."); setBusy(false); return; }
+      finishLogin(res);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Invalid code");
       setBusy(false);
     }
   }
@@ -136,15 +164,25 @@ function AuthPage() {
           </div>
         </div>
 
-        {tab === "login" ? (
+        {twoFA ? (
+          <form onSubmit={onVerify2FA} className="space-y-3 border rounded-2xl p-6 bg-card">
+            <h1 className="text-2xl font-bold text-center mb-1">Two-factor authentication</h1>
+            <p className="text-sm text-muted-foreground text-center mb-2">Enter the 6-digit code from your authenticator app, or a recovery code.</p>
+            <input value={twoFACode} onChange={(e) => setTwoFACode(e.target.value)} inputMode="numeric" autoComplete="one-time-code" autoFocus placeholder="123456" className="w-full border rounded-md px-3 py-2.5 text-center text-lg tracking-[0.3em] focus:outline-none focus:ring-2 focus:ring-primary/30" />
+            <button disabled={busy || twoFACode.trim().length < 6} className="w-full bg-primary text-primary-foreground py-2.5 rounded-md font-semibold hover:bg-primary/90 disabled:opacity-60">
+              {busy ? "Verifying…" : "Verify & sign in"}
+            </button>
+            <button type="button" onClick={() => { setTwoFA(null); setTwoFACode(""); }} className="text-xs text-muted-foreground hover:text-primary block text-center w-full">← Back</button>
+          </form>
+        ) : tab === "login" ? (
           <form onSubmit={onLogin} className="space-y-3 border rounded-2xl p-6 bg-card">
             <h1 className="text-2xl font-bold text-center mb-2">Welcome back</h1>
             <Input name="email" type="email" placeholder="Email" required />
-            <Input name="password" type="password" placeholder="Password" required minLength={8} />
+            <PasswordInput name="password" placeholder="Password" required minLength={8} />
             <button disabled={busy} className="w-full bg-primary text-primary-foreground py-2.5 rounded-md font-semibold hover:bg-primary/90 disabled:opacity-60">
               {busy ? "Signing in…" : "Sign in"}
             </button>
-            <Link to="/reset-password" className="text-xs text-muted-foreground hover:text-primary block text-center">Forgot password?</Link>
+            <Link to="/reset-password" search={{ token: undefined }} className="text-xs text-muted-foreground hover:text-primary block text-center">Forgot password?</Link>
           </form>
         ) : (
           <form onSubmit={onSignup} className="space-y-3 border rounded-2xl p-6 bg-card">
@@ -152,7 +190,7 @@ function AuthPage() {
             <Input name="full_name" placeholder="Full name *" required />
             <Input name="email" type="email" placeholder="Email *" required />
             <Input name="phone" type="tel" placeholder="Phone * (e.g. 017XXXXXXXX)" required />
-            <Input name="password" type="password" placeholder="Password (min 8 chars) *" required minLength={8} />
+            <PasswordInput name="password" placeholder="Password (min 8 chars) *" required minLength={8} />
             <button disabled={busy} className="w-full bg-primary text-primary-foreground py-2.5 rounded-md font-semibold hover:bg-primary/90 disabled:opacity-60">
               {busy ? "Creating…" : "Create account"}
             </button>
@@ -171,6 +209,19 @@ function AuthPage() {
 
 function Input({ className = "", ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={`w-full border rounded-md px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 ${className}`} />;
+}
+
+// Password field with a show/hide toggle.
+function PasswordInput({ className = "", ...props }: React.InputHTMLAttributes<HTMLInputElement>) {
+  const [show, setShow] = useState(false);
+  return (
+    <div className="relative">
+      <input {...props} type={show ? "text" : "password"} className={`w-full border rounded-md px-3 py-2.5 pr-11 text-sm focus:outline-none focus:ring-2 focus:ring-primary/30 ${className}`} />
+      <button type="button" onClick={() => setShow((s) => !s)} aria-label={show ? "Hide password" : "Show password"} className="absolute right-2.5 top-1/2 -translate-y-1/2 text-muted-foreground hover:text-foreground">
+        {show ? <EyeOff className="h-4 w-4" /> : <Eye className="h-4 w-4" />}
+      </button>
+    </div>
+  );
 }
 
 function GoogleIcon() {

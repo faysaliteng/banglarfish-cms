@@ -1,6 +1,6 @@
 // Shared client-facing types (no server/pg imports — safe in any bundle).
 
-export type Variant = { id: string; label: string; price: number; stock: number };
+export type Variant = { id: string; label: string; price: number; stock: number; sku?: string; attributes?: ProductAttribute[] };
 
 export type ProductAttribute = { name: string; value: string };
 
@@ -27,6 +27,13 @@ export type Product = {
   attributes: ProductAttribute[];
   sku?: string;
   brand?: string;
+  taxClass?: string;
+  shippingClass?: string;
+  lowStockThreshold?: number;
+  isDigital?: boolean;
+  downloadUrl?: string;
+  noindex?: boolean;
+  focusKeyword?: string;
   metaTitle?: string;
   metaDescription?: string;
   ogImage?: string;
@@ -58,6 +65,7 @@ export type CmsPage = {
   ogImage?: string;
   noindex?: boolean;
   template?: string;
+  faq?: { q: string; a: string }[];
   showInHeader?: boolean;
   showInFooter?: boolean;
   sort?: number;
@@ -78,6 +86,8 @@ export type BlogPost = {
   metaTitle?: string;
   metaDescription?: string;
   ogImage?: string;
+  noindex?: boolean;
+  focusKeyword?: string;
 };
 
 export type Banner = {
@@ -144,6 +154,8 @@ export type HomeSections = {
   blog: boolean;
   testimonials: boolean;
   newsletter: boolean;
+  comments?: boolean; // blog comments (with moderation) — optional so existing templates stay valid; defaults on
+  contact?: boolean; // /contact page + contact form — optional; defaults on
 };
 
 export type Settings = {

@@ -363,3 +363,35 @@
 @media (prefers-reduced-motion: reduce) {
   .bf-float { animation: none; }
 }
+
+/* ============================================================================
+   Admin panel isolation.
+   The storefront theme engine ( #bf-root[data-surface|data-bg|data-hover3d] )
+   applies decorative effects to every .bg-card and paints an animated gradient
+   on #bf-root. Admin renders inside #bf-root, and its wrapper is translucent, so
+   a "glass / aurora / mesh" store theme bleeds through: the dashboard fills with
+   a drifting gradient and its tables blur + tilt in 3D — unreadable.
+   Inside .bf-admin we force a solid, static, theme-independent surface.
+   `!important` is intentional: it overrides the engine's #bf-root[data-*] ID
+   rules regardless of which surface/bg/hover3d combination the store uses.
+   ============================================================================ */
+.bf-admin {
+  /* Opaque base so the #bf-root gradient can't show through the panel. */
+  background-color: color-mix(in srgb, var(--muted) 30%, var(--background)) !important;
+}
+.bf-admin .bg-card {
+  background-color: var(--card) !important;
+  -webkit-backdrop-filter: none !important;
+  backdrop-filter: none !important;
+  transform: none !important;                 /* kill hover-lift / 3D tilt */
+  transition: box-shadow 0.15s ease, border-color 0.15s ease !important;
+}
+.bf-admin .bg-card:hover {
+  transform: none !important;                 /* kill hover3d perspective tilt */
+}
+.bf-admin .bg-card::before,
+.bf-admin .bg-card::after {
+  content: none !important;                   /* kill aurora conic ring / glossy sheen */
+  background: none !important;
+  animation: none !important;
+}

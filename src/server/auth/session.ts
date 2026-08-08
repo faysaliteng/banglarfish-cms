@@ -71,3 +71,9 @@ export async function destroySession(): Promise<void> {
   if (token) await db.delete(sessions).where(eq(sessions.id, hashToken(token)));
   deleteCookie(COOKIE, { path: "/" });
 }
+
+// Hashed id of the current request's session (for "this device" marking / revocation).
+export function currentSessionId(): string | null {
+  const token = getCookie(COOKIE);
+  return token ? hashToken(token) : null;
+}

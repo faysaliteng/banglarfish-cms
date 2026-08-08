@@ -7,19 +7,23 @@ export const Route = createFileRoute("/pages/$slug")({
   loader: async ({ params }) => {
     const page = await getPage({ data: { slug: params.slug } });
     if (!page) throw notFound();
-    return { page };
+    const siteUrl = typeof process !== "undefined" ? (process.env.APP_URL || "").replace(/\/+$/, "") : "";
+    return { page, siteUrl };
   },
   head: ({ loaderData }) => {
     const p = loaderData?.page;
     if (!p) return { meta: [{ title: "Page — Banglarfish" }] };
+    const canonical = (loaderData?.siteUrl || "") ? `${loaderData.siteUrl}/pages/${p.slug}` : `/pages/${p.slug}`;
     return {
       meta: [
         { title: `${p.metaTitle || p.title} — Banglarfish` },
         { name: "description", content: p.metaDescription || "" },
         ...(p.noindex ? [{ name: "robots", content: "noindex" }] : []),
         { property: "og:title", content: p.metaTitle || p.title },
+        { property: "og:url", content: canonical },
         ...(p.ogImage ? [{ property: "og:image", content: p.ogImage }] : []),
       ],
+      links: [{ rel: "canonical", href: canonical }],
     };
   },
   component: Page,
@@ -32,6 +36,14 @@ function looksLikeHtml(s: string) {
 
 function Page() {
   const { page } = Route.useLoaderData();
+  const faq = (page.faq ?? []).filter((f) => f?.q && f?.a);
+  const faqLd = faq.length
+    ? {
+        "@context": "https://schema.org",
+        "@type": "FAQPage",
+        mainEntity: faq.map((f) => ({ "@type": "Question", name: f.q, acceptedAnswer: { "@type": "Answer", text: f.a } })),
+      }
+    : null;
   return (
     <SiteLayout>
       <div className="container-x py-14 max-w-3xl">
@@ -41,6 +53,24 @@ function Page() {
         ) : (
           <div className="mt-6 text-muted-foreground leading-relaxed text-lg whitespace-pre-line">{page.body}</div>
         )}
+
+        {faq.length > 0 && (
+          <section className="mt-12" aria-label="Frequently asked questions">
+            <h2 className="text-2xl font-bold mb-4">Frequently asked questions</h2>
+            <div className="divide-y border rounded-2xl bg-card">
+              {faq.map((f, i) => (
+                <details key={i} className="group p-4">
+                  <summary className="cursor-pointer font-semibold list-none flex items-center justify-between gap-3">
+                    {f.q}
+                    <span className="text-muted-foreground transition group-open:rotate-45 text-xl leading-none">+</span>
+                  </summary>
+                  <p className="mt-3 text-muted-foreground leading-relaxed whitespace-pre-line">{f.a}</p>
+                </details>
+              ))}
+            </div>
+          </section>
+        )}
+        {faqLd && <script type="application/ld+json" dangerouslySetInnerHTML={{ __html: JSON.stringify(faqLd) }} />}
       </div>
     </SiteLayout>
   );

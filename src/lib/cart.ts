@@ -9,6 +9,7 @@ export type CartLine = {
   price: number;
   weight: string;
   qty: number;
+  isDigital?: boolean;
 };
 
 const KEY = "banglarfish_cart_v1";
@@ -82,7 +83,9 @@ export function useCart() {
 
 export function cartTotals(lines: CartLine[]) {
   const subtotal = lines.reduce((s, l) => s + l.price * l.qty, 0);
-  const shipping = subtotal === 0 ? 0 : subtotal >= 2000 ? 0 : 80;
+  // All-digital carts never ship (matches the authoritative server calculation).
+  const allDigital = lines.length > 0 && lines.every((l) => l.isDigital);
+  const shipping = allDigital || subtotal === 0 ? 0 : subtotal >= 2000 ? 0 : 80;
   return { subtotal, shipping, total: subtotal + shipping };
 }
 

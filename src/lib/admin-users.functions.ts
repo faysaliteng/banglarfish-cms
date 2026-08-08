@@ -14,6 +14,7 @@ export type AdminUserRow = {
   created_at: string;
   roles: string[];
   status: string;
+  customer_group: string;
   orders: number;
   spent: number;
 };
@@ -54,13 +55,14 @@ export const listAllUsers = createServerFn({ method: "GET" }).handler(async (): 
       created_at: u.createdAt.toISOString(),
       roles: [u.role],
       status: u.status,
+      customer_group: (u as { customerGroup?: string }).customerGroup ?? "",
       orders: s.orders,
       spent: s.spent,
     };
   });
 });
 
-const roleEnum = z.enum(["customer", "staff", "manager", "admin"]);
+const roleEnum = z.enum(["customer", "support", "staff", "manager", "admin"]);
 
 const CreateUser = z.object({
   email: z.string().trim().email().max(255),
@@ -109,6 +111,7 @@ const UpdateUser = z.object({
   district: z.string().trim().max(80).optional().nullable(),
   postal_code: z.string().trim().max(20).optional().nullable(),
   role: roleEnum.optional(),
+  customer_group: z.string().max(60).optional(),
 });
 
 export const adminUpdateUser = createServerFn({ method: "POST" })
@@ -127,6 +130,7 @@ export const adminUpdateUser = createServerFn({ method: "POST" })
     if (data.full_name) userPatch.fullName = data.full_name;
     if (data.phone) userPatch.phone = data.phone;
     if (data.role) userPatch.role = data.role;
+    if (data.customer_group !== undefined) userPatch.customerGroup = data.customer_group;
     if (data.password && data.password.length >= 8) userPatch.passwordHash = await hashPassword(data.password);
     await db.update(users).set(userPatch).where(eq(users.id, data.id));
 

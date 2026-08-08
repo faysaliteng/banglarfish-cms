@@ -3,14 +3,14 @@ export { THEME_PRESETS, defaultTheme } from "@/lib/theme-presets";
 
 export const defaultSettings: Settings = {
   storeName: "Banglarfish",
-  storeEmail: "hello@banglarfish.com",
-  storePhone: "+880 1000-000000",
+  storeEmail: "support@banglarfish.com",
+  storePhone: "+880 9642-057407",
   currency: "BDT",
   currencySymbol: "৳",
   currencyPosition: "before",
   currencyDecimals: 0,
   currencyThousandSep: ",",
-  address: "House 12, Road 5, Dhanmondi, Dhaka 1205",
+  address: "House-349, Road-15, Block-K, South Banasree, Dhaka",
   freeShippingThreshold: 2000,
   standardShipping: 80,
   taxPercent: 0,
@@ -84,5 +84,7 @@ export const defaultHomepage: Homepage = {
     blog: true,
     testimonials: true,
     newsletter: true,
+    comments: true,
+    contact: true,
   },
 };

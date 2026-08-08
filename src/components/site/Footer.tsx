@@ -2,13 +2,20 @@ import { Link } from "@tanstack/react-router";
 import { useQuery } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { Logo } from "./Logo";
-import { getMenus } from "@/lib/catalog.functions";
+import { getMenus, getSettings } from "@/lib/catalog.functions";
 import { Facebook, Instagram, Youtube, Mail, MapPin, Phone } from "lucide-react";
+import { useI18n } from "@/lib/i18n";
 
 export function Footer() {
   const menusFn = useServerFn(getMenus);
   const { data: menus } = useQuery({ queryKey: ["menus"], queryFn: () => menusFn(), staleTime: 300_000 });
   const footerLinks = menus?.footer ?? [];
+  const settingsFn = useServerFn(getSettings);
+  const { data: settings } = useQuery({ queryKey: ["settings"], queryFn: () => settingsFn(), staleTime: 300_000 });
+  const address = settings?.address || "House-349, Road-15, Block-K, South Banasree, Dhaka";
+  const phone = settings?.storePhone || "+880 9642-057407";
+  const email = settings?.storeEmail || "support@banglarfish.com";
+  const { t } = useI18n();
   return (
     <footer className="bg-[oklch(0.18_0.02_250)] text-white/85 mt-16">
       <div className="container-x py-14 grid gap-10 sm:grid-cols-2 md:grid-cols-4">
@@ -24,7 +31,7 @@ export function Footer() {
           </div>
         </div>
         <div>
-          <h4 className="text-white font-semibold mb-4">Shop</h4>
+          <h4 className="text-white font-semibold mb-4">{t("footer.shop")}</h4>
           <ul className="space-y-2 text-sm">
             <li><Link to="/category/$slug" params={{ slug: "hilsa" }} className="hover:text-primary">Hilsa</Link></li>
             <li><Link to="/category/$slug" params={{ slug: "freshwater" }} className="hover:text-primary">Freshwater</Link></li>
@@ -34,7 +41,7 @@ export function Footer() {
           </ul>
         </div>
         <div>
-          <h4 className="text-white font-semibold mb-4">Help</h4>
+          <h4 className="text-white font-semibold mb-4">{t("footer.help")}</h4>
           <ul className="space-y-2 text-sm">
             <li><Link to="/pages/$slug" params={{ slug: "about" }} className="hover:text-primary">About Us</Link></li>
             <li><Link to="/pages/$slug" params={{ slug: "shipping" }} className="hover:text-primary">Shipping & Delivery</Link></li>
@@ -48,20 +55,21 @@ export function Footer() {
           </ul>
         </div>
         <div className="min-w-0">
-          <h4 className="text-white font-semibold mb-4">Contact</h4>
+          <h4 className="text-white font-semibold mb-4">{t("footer.contact")}</h4>
           <ul className="space-y-3 text-sm">
-            <li className="flex gap-2"><MapPin className="h-4 w-4 mt-0.5 shrink-0" /> <span className="break-words min-w-0">House 12, Road 5, Dhanmondi, Dhaka 1205</span></li>
-            <li className="flex gap-2"><Phone className="h-4 w-4 mt-0.5 shrink-0" /> <span className="break-words min-w-0">+880 1000-000000</span></li>
-            <li className="flex gap-2"><Mail className="h-4 w-4 mt-0.5 shrink-0" /> <span className="break-all min-w-0">hello@banglarfish.com</span></li>
+            <li className="flex gap-2"><MapPin className="h-4 w-4 mt-0.5 shrink-0" /> <span className="break-words min-w-0">{address}</span></li>
+            <li className="flex gap-2"><Phone className="h-4 w-4 mt-0.5 shrink-0" /> <a href={`tel:${phone.replace(/[^+\d]/g, "")}`} className="break-words min-w-0 hover:text-primary">{phone}</a></li>
+            <li className="flex gap-2"><Mail className="h-4 w-4 mt-0.5 shrink-0" /> <a href={`mailto:${email}`} className="break-all min-w-0 hover:text-primary">{email}</a></li>
           </ul>
         </div>
       </div>
       <div className="border-t border-white/10">
         <div className="container-x py-5 flex flex-col md:flex-row items-center justify-between gap-3 text-xs text-white/60">
-          <p>© {new Date().getFullYear()} Banglarfish. All rights reserved.</p>
+          <p>© {new Date().getFullYear()} Banglarfish. {t("footer.rights")}</p>
           <div className="flex gap-5">
             <Link to="/pages/$slug" params={{ slug: "privacy" }} className="hover:text-white">Privacy</Link>
             <Link to="/pages/$slug" params={{ slug: "terms" }} className="hover:text-white">Terms</Link>
+            <Link to="/pages/$slug" params={{ slug: "dmca" }} className="hover:text-white">DMCA</Link>
           </div>
         </div>
       </div>

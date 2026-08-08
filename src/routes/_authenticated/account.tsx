@@ -3,13 +3,16 @@ import { SiteLayout } from "@/components/site/SiteLayout";
 import { ProductCard } from "@/components/site/ProductCard";
 import { useEffect, useMemo, useState } from "react";
 import { useServerFn } from "@tanstack/react-start";
-import { getProfile, updateMyProfile, changeEmail, changePassword, listWishlist, toggleWishlist, type Profile } from "@/lib/account.functions";
+import { getProfile, updateMyProfile, changeEmail, changePassword, listWishlist, toggleWishlist, listMySessions, revokeSession, revokeOtherSessions, type Profile, type SessionRow } from "@/lib/account.functions";
 import { requestPhoneVerify, confirmPhoneVerify } from "@/lib/auth.functions";
 import { listMyOrders } from "@/lib/orders.functions";
+import { submitReturn } from "@/lib/returns.functions";
+import { exportMyData, deleteMyAccount } from "@/lib/privacy.functions";
+import { get2FAStatus, begin2FASetup, confirm2FASetup, disable2FA, type TwoFactorSetup } from "@/lib/twofactor.functions";
 import { useQueryClient } from "@tanstack/react-query";
 import { useSession, useSignOut } from "@/lib/auth";
 import type { Product } from "@/lib/types";
-import { LayoutDashboard, ShoppingBag, Heart, User as UserIcon, ShieldCheck, LogOut, ShieldAlert, Package, ArrowRight, BadgeCheck } from "lucide-react";
+import { LayoutDashboard, ShoppingBag, Heart, User as UserIcon, ShieldCheck, LogOut, ShieldAlert, Package, ArrowRight, BadgeCheck, Download, Trash2 } from "lucide-react";
 import { toast } from "sonner";
 
 const fmt = (n: number) => `৳${n.toLocaleString("en-IN")}`;
@@ -292,6 +295,7 @@ function OrdersTab({ orders }: { orders: OrderRow[] }) {
                 <span className="px-2 py-1 rounded-full bg-primary/10 text-primary font-medium capitalize">{o.status}</span>
                 <span className="px-2 py-1 rounded-full bg-muted capitalize">{o.payment_status}</span>
                 <span className="font-bold text-sm">{fmt(Number(o.total))}</span>
+                <a href={`/invoice/${o.order_number}`} target="_blank" rel="noreferrer" className="px-2 py-1 rounded-md border font-semibold hover:bg-muted">Invoice</a>
               </div>
             </div>
             <div className="space-y-2">
@@ -306,9 +310,40 @@ function OrdersTab({ orders }: { orders: OrderRow[] }) {
                 </div>
               ))}
             </div>
+            <ReturnRequest orderId={o.id} />
           </div>
         ))}
       </div>
+    </div>
+  );
+}
+
+function ReturnRequest({ orderId }: { orderId: string }) {
+  const submit = useServerFn(submitReturn);
+  const [open, setOpen] = useState(false);
+  const [reason, setReason] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [done, setDone] = useState(false);
+
+  if (done) return <p className="mt-3 pt-3 border-t text-xs text-emerald-700">✓ Return request submitted. We'll review it shortly.</p>;
+
+  return (
+    <div className="mt-3 pt-3 border-t">
+      {!open ? (
+        <button onClick={() => setOpen(true)} className="text-xs font-semibold text-primary hover:underline">Request a return</button>
+      ) : (
+        <div className="space-y-2">
+          <textarea value={reason} onChange={(e) => setReason(e.target.value)} placeholder="Tell us why you'd like to return this order…" rows={2} className="w-full border rounded-md px-3 py-2 text-sm" />
+          <div className="flex gap-2">
+            <button
+              disabled={busy || reason.trim().length < 5}
+              onClick={async () => { setBusy(true); try { await submit({ data: { orderId, reason } }); setDone(true); } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); } finally { setBusy(false); } }}
+              className="text-xs font-semibold bg-primary text-primary-foreground px-3 py-1.5 rounded-md disabled:opacity-60"
+            >{busy ? "Submitting…" : "Submit request"}</button>
+            <button onClick={() => setOpen(false)} className="text-xs px-3 py-1.5 rounded-md border">Cancel</button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -436,6 +471,213 @@ function SecurityTab({ email, onEmail, onPassword }: { email: string; onEmail: (
           <input name="password" type="password" placeholder="New password (min 8 chars)" minLength={8} required className="w-full border rounded-md px-3 py-2.5 text-sm" />
           <button className="bg-primary text-primary-foreground px-4 py-2 rounded-md text-sm font-semibold">Update password</button>
         </form>
+      </div>
+      <TwoFactorSection />
+      <SessionManager />
+      <PrivacySection />
+    </div>
+  );
+}
+
+function TwoFactorSection() {
+  const statusFn = useServerFn(get2FAStatus);
+  const beginFn = useServerFn(begin2FASetup);
+  const confirmFn = useServerFn(confirm2FASetup);
+  const disableFn = useServerFn(disable2FA);
+  const [enabled, setEnabled] = useState<boolean | null>(null);
+  const [setup, setSetup] = useState<TwoFactorSetup | null>(null);
+  const [code, setCode] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [recovery, setRecovery] = useState<string[] | null>(null);
+  const [disabling, setDisabling] = useState(false);
+
+  useEffect(() => { statusFn().then((s) => setEnabled(s.enabled)).catch(() => setEnabled(false)); }, [statusFn]);
+
+  async function onBegin() {
+    setBusy(true);
+    try { setSetup(await beginFn()); } catch (e) { toast.error(e instanceof Error ? e.message : "Failed"); } finally { setBusy(false); }
+  }
+  async function onConfirm() {
+    setBusy(true);
+    try {
+      const res = await confirmFn({ data: { code: code.trim() } });
+      setRecovery(res.recoveryCodes);
+      setEnabled(true);
+      setSetup(null);
+      setCode("");
+      toast.success("Two-factor authentication enabled.");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Invalid code"); } finally { setBusy(false); }
+  }
+  async function onDisable() {
+    setBusy(true);
+    try {
+      await disableFn({ data: { code: code.trim() } });
+      setEnabled(false);
+      setDisabling(false);
+      setCode("");
+      toast.success("Two-factor authentication disabled.");
+    } catch (e) { toast.error(e instanceof Error ? e.message : "Invalid code"); } finally { setBusy(false); }
+  }
+
+  return (
+    <div className="mt-8 border rounded-2xl p-6 bg-card max-w-4xl">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h3 className="font-semibold flex items-center gap-2"><ShieldCheck className="h-4 w-4" /> Two-factor authentication</h3>
+          <p className="text-sm text-muted-foreground mt-1">Protect your account with a code from an authenticator app (Google Authenticator, Authy, 1Password…).</p>
+        </div>
+        {enabled !== null && (
+          <span className={`text-xs font-semibold px-3 py-1 rounded-full ${enabled ? "bg-emerald-100 text-emerald-700" : "bg-muted text-muted-foreground"}`}>{enabled ? "Enabled" : "Off"}</span>
+        )}
+      </div>
+
+      {recovery && (
+        <div className="mt-4 rounded-xl border border-amber-300/60 bg-amber-50 p-4">
+          <p className="text-sm font-semibold text-amber-800">Save your recovery codes</p>
+          <p className="text-xs text-amber-700 mb-3">Each can be used once if you lose your device. Store them somewhere safe — they won't be shown again.</p>
+          <div className="grid grid-cols-2 gap-2 font-mono text-sm">
+            {recovery.map((c) => <span key={c} className="bg-white/70 rounded px-2 py-1 text-center">{c}</span>)}
+          </div>
+          <button onClick={() => setRecovery(null)} className="mt-3 text-xs font-semibold bg-amber-600 text-white px-3 py-1.5 rounded-md">I've saved them</button>
+        </div>
+      )}
+
+      {enabled === false && !setup && !recovery && (
+        <button onClick={onBegin} disabled={busy} className="mt-4 text-sm font-semibold bg-primary text-primary-foreground px-4 py-2 rounded-md disabled:opacity-60">{busy ? "Preparing…" : "Enable 2FA"}</button>
+      )}
+
+      {setup && (
+        <div className="mt-4 space-y-3">
+          <p className="text-sm">1. Add this secret to your authenticator app (manual entry):</p>
+          <code className="block font-mono text-sm bg-muted rounded-md px-3 py-2 select-all break-all">{setup.secret}</code>
+          <p className="text-xs text-muted-foreground break-all">Or use this setup URL: <span className="select-all">{setup.otpauthUrl}</span></p>
+          <p className="text-sm">2. Enter the 6-digit code it shows:</p>
+          <div className="flex gap-2">
+            <input value={code} onChange={(e) => setCode(e.target.value)} inputMode="numeric" placeholder="123456" className="border rounded-md px-3 py-2 text-sm w-40 text-center tracking-widest" />
+            <button onClick={onConfirm} disabled={busy || code.trim().length < 6} className="text-sm font-semibold bg-primary text-primary-foreground px-4 py-2 rounded-md disabled:opacity-60">{busy ? "Verifying…" : "Confirm & enable"}</button>
+            <button onClick={() => { setSetup(null); setCode(""); }} className="text-sm px-4 py-2 rounded-md border">Cancel</button>
+          </div>
+        </div>
+      )}
+
+      {enabled === true && !disabling && !recovery && (
+        <button onClick={() => setDisabling(true)} className="mt-4 text-sm font-semibold border border-destructive/40 text-destructive px-4 py-2 rounded-md hover:bg-destructive/10">Disable 2FA</button>
+      )}
+      {enabled === true && disabling && (
+        <div className="mt-4 space-y-2">
+          <p className="text-sm text-muted-foreground">Enter a current code (or recovery code) to disable 2FA.</p>
+          <div className="flex gap-2">
+            <input value={code} onChange={(e) => setCode(e.target.value)} placeholder="Code" className="border rounded-md px-3 py-2 text-sm w-40 text-center tracking-widest" />
+            <button onClick={onDisable} disabled={busy || code.trim().length < 6} className="text-sm font-semibold bg-destructive text-white px-4 py-2 rounded-md disabled:opacity-50">{busy ? "…" : "Disable"}</button>
+            <button onClick={() => { setDisabling(false); setCode(""); }} className="text-sm px-4 py-2 rounded-md border">Cancel</button>
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+function PrivacySection() {
+  const nav = useNavigate();
+  const signOut = useSignOut();
+  const doExport = useServerFn(exportMyData);
+  const doDelete = useServerFn(deleteMyAccount);
+  const [busy, setBusy] = useState(false);
+  const [confirming, setConfirming] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+
+  async function onExport() {
+    setBusy(true);
+    try {
+      const json = await doExport();
+      const blob = new Blob([json], { type: "application/json" });
+      const a = document.createElement("a");
+      a.href = URL.createObjectURL(blob);
+      a.download = `my-data-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+      toast.success("Your data export was downloaded.");
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Export failed");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function onDelete() {
+    setBusy(true);
+    try {
+      await doDelete({ data: { confirm: "DELETE" } });
+      toast.success("Your account has been deleted.");
+      try { await signOut(); } catch { /* already signed out server-side */ }
+      nav({ to: "/" });
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Deletion failed");
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="mt-8 border rounded-2xl p-6 bg-card max-w-4xl">
+      <h3 className="font-semibold">Privacy & your data</h3>
+      <p className="text-sm text-muted-foreground mt-1">Download everything we hold about you, or permanently delete your account.</p>
+      <div className="mt-4 flex flex-wrap gap-3">
+        <button onClick={onExport} disabled={busy} className="inline-flex items-center gap-2 text-sm font-semibold border rounded-md px-4 py-2 hover:bg-muted disabled:opacity-60">
+          <Download className="h-4 w-4" /> Download my data
+        </button>
+        {!confirming ? (
+          <button onClick={() => setConfirming(true)} className="inline-flex items-center gap-2 text-sm font-semibold border border-destructive/40 text-destructive rounded-md px-4 py-2 hover:bg-destructive/10">
+            <Trash2 className="h-4 w-4" /> Delete my account
+          </button>
+        ) : (
+          <div className="w-full mt-2 rounded-xl border border-destructive/40 bg-destructive/5 p-4 space-y-3">
+            <p className="text-sm text-destructive font-medium">This permanently deletes your account and removes your personal data. Your past orders are anonymized and kept for accounting. This cannot be undone.</p>
+            <p className="text-xs text-muted-foreground">Type <strong>DELETE</strong> to confirm.</p>
+            <input value={confirmText} onChange={(e) => setConfirmText(e.target.value)} className="border rounded-md px-3 py-2 text-sm w-48" placeholder="DELETE" />
+            <div className="flex gap-2">
+              <button onClick={onDelete} disabled={busy || confirmText !== "DELETE"} className="text-sm font-semibold bg-destructive text-white px-4 py-2 rounded-md disabled:opacity-50">{busy ? "Deleting…" : "Permanently delete"}</button>
+              <button onClick={() => { setConfirming(false); setConfirmText(""); }} className="text-sm px-4 py-2 rounded-md border">Cancel</button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
+function SessionManager() {
+  const listFn = useServerFn(listMySessions);
+  const revokeFn = useServerFn(revokeSession);
+  const revokeAllFn = useServerFn(revokeOtherSessions);
+  const [rows, setRows] = useState<SessionRow[]>([]);
+  const load = () => listFn().then(setRows).catch(() => {});
+  useEffect(() => { load(); /* eslint-disable-next-line */ }, []);
+  function device(ua: string | null) {
+    if (!ua) return "Unknown device";
+    const s = ua.toLowerCase();
+    const os = /iphone|ipad|ios/.test(s) ? "iOS" : /android/.test(s) ? "Android" : /windows/.test(s) ? "Windows" : /mac/.test(s) ? "macOS" : /linux/.test(s) ? "Linux" : "Device";
+    const br = /edg/.test(s) ? "Edge" : /chrome/.test(s) ? "Chrome" : /firefox/.test(s) ? "Firefox" : /safari/.test(s) ? "Safari" : "Browser";
+    return `${br} on ${os}`;
+  }
+  return (
+    <div className="mt-8 border rounded-2xl p-6 bg-card max-w-4xl">
+      <div className="flex items-center justify-between mb-3">
+        <h3 className="font-semibold">Active sessions</h3>
+        {rows.length > 1 && (
+          <button onClick={async () => { await revokeAllFn(); load(); }} className="text-sm px-3 py-1.5 rounded-md border hover:bg-muted">Sign out other devices</button>
+        )}
+      </div>
+      <div className="space-y-2">
+        {rows.map((s) => (
+          <div key={s.id} className="flex items-center gap-3 border rounded-lg p-3 text-sm">
+            <div className="min-w-0 flex-1">
+              <p className="font-medium">{device(s.userAgent)} {s.current && <span className="text-[10px] uppercase font-bold text-primary ml-1">this device</span>}</p>
+              <p className="text-xs text-muted-foreground">{s.ip || "unknown IP"} · started {new Date(s.createdAt).toLocaleString()}</p>
+            </div>
+            {!s.current && <button onClick={async () => { await revokeFn({ data: { id: s.id } }); load(); }} className="text-xs px-2.5 py-1 rounded-md border text-destructive hover:bg-muted">Revoke</button>}
+          </div>
+        ))}
+        {rows.length === 0 && <p className="text-sm text-muted-foreground">No active sessions.</p>}
       </div>
     </div>
   );

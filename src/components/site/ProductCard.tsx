@@ -2,6 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { ShoppingBag, Star } from "lucide-react";
 import type { Product } from "@/lib/types";
 import { cart, formatBDT } from "@/lib/cart";
+import { Img } from "./Img";
 
 export function ProductCard({ product }: { product: Product }) {
   const discount = product.compareAt
@@ -11,7 +12,7 @@ export function ProductCard({ product }: { product: Product }) {
   return (
     <div className="group relative flex flex-col rounded-xl border bg-card overflow-hidden hover:shadow-lg transition-shadow">
       <Link to="/product/$slug" params={{ slug: product.slug }} className="relative block aspect-square overflow-hidden bg-muted">
-        <img src={product.image} alt={product.name} loading="lazy" className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500" />
+        <Img src={product.image} alt={product.name} width={400} height={400} sizes="(max-width: 768px) 50vw, 25vw" widths={[300, 600]} className="h-full w-full object-cover group-hover:scale-105 transition-transform duration-500" />
         <div className="absolute top-2 left-2 flex flex-col gap-1">
           {discount > 0 && <span className="bg-[var(--color-brand)] text-white text-[11px] font-bold px-2 py-0.5 rounded">−{discount}%</span>}
           {product.isNew && <span className="bg-primary text-white text-[11px] font-bold px-2 py-0.5 rounded">NEW</span>}
@@ -43,6 +44,7 @@ export function ProductCard({ product }: { product: Product }) {
               image: product.image,
               price: v?.price ?? product.price,
               weight: v?.label ?? product.weightOptions[1] ?? product.weightOptions[0] ?? "",
+              isDigital: !!product.isDigital,
             });
           }}
           className="mt-3 inline-flex items-center justify-center gap-2 rounded-md bg-primary text-primary-foreground text-sm font-medium py-2 hover:bg-primary/90 transition"
