@@ -140,6 +140,76 @@ export const adminListMedia = createServerFn({ method: "GET" }).handler(async ()
   return rows.map((m) => ({ id: m.id, name: m.name, url: m.url, size: m.size, uploadedAt: m.uploadedAt.toISOString().slice(0, 10), alt: (m as { alt?: string }).alt ?? "", lqip: (m as { lqip?: string }).lqip ?? "" }));
 });
 
+// Register images that already exist on disk (shipped assets in public/img and
+// anything in UPLOAD_DIR) into the media library. The library only ever gained
+// rows from the admin uploader, so seeded/static artwork was invisible in it.
+// Idempotent: dedupes on content hash, so re-running adds only what's new.
+export const adminSyncMediaLibrary = createServerFn({ method: "POST" }).handler(async (): Promise<{ added: number; skipped: number; scanned: number }> => {
+  const { requireStaff } = await import("@/server/auth/context");
+  const { db } = await import("@/server/db");
+  const { media } = await import("@/server/db/schema");
+  const { eq } = await import("drizzle-orm");
+  const { readdir, readFile, stat } = await import("node:fs/promises");
+  const { createHash } = await import("node:crypto");
+  const path = await import("node:path");
+  await requireStaff();
+
+  const IMG = /\.(jpe?g|png|webp|gif|avif|svg)$/i;
+  const roots: { dir: string; urlBase: string }[] = [
+    { dir: path.join(process.cwd(), "public", "img"), urlBase: "/img" },
+    { dir: process.env.UPLOAD_DIR ?? path.join(process.cwd(), "public", "uploads"), urlBase: "/uploads" },
+  ];
+
+  // Walk a directory tree, skipping the derived-rendition cache.
+  async function walk(dir: string, urlBase: string, out: { file: string; url: string }[]) {
+    let entries: import("node:fs").Dirent[];
+    try { entries = await readdir(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (e.name.startsWith("_") || e.name.startsWith(".")) continue; // _cache etc.
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) await walk(full, `${urlBase}/${e.name}`, out);
+      else if (IMG.test(e.name)) out.push({ file: full, url: `${urlBase}/${e.name}` });
+    }
+  }
+
+  const found: { file: string; url: string }[] = [];
+  for (const r of roots) await walk(r.dir, r.urlBase, found);
+
+  let added = 0, skipped = 0;
+  for (const f of found) {
+    try {
+      const [byUrl] = await db.select({ id: media.id }).from(media).where(eq(media.url, f.url)).limit(1);
+      if (byUrl) { skipped++; continue; }
+      const buf = await readFile(f.file);
+      const hash = createHash("sha256").update(buf).digest("hex");
+      const [byHash] = await db.select({ id: media.id }).from(media).where(eq(media.hash, hash)).limit(1);
+      if (byHash) { skipped++; continue; }
+
+      let width: number | null = null, height: number | null = null, lqip = "";
+      if (!/\.svg$/i.test(f.file)) {
+        try {
+          const sharp = (await import("sharp")).default;
+          const meta = await sharp(buf).metadata();
+          width = meta.width ?? null; height = meta.height ?? null;
+          const tiny = await sharp(buf).resize(24, 24, { fit: "inside" }).webp({ quality: 40 }).toBuffer();
+          lqip = `data:image/webp;base64,${tiny.toString("base64")}`;
+        } catch { /* keep going without dimensions */ }
+      }
+      const st = await stat(f.file);
+      await db.insert(media).values({
+        name: path.basename(f.file), url: f.url,
+        size: `${Math.max(1, Math.round(st.size / 1024))} KB`,
+        width, height, hash, lqip,
+      });
+      added++;
+    } catch (e) {
+      console.error("[media-sync] skipped", f.url, e instanceof Error ? e.message : e);
+      skipped++;
+    }
+  }
+  return { added, skipped, scanned: found.length };
+});
+
 export const adminSetMediaAlt = createServerFn({ method: "POST" })
   .inputValidator((i: unknown) => z.object({ id: z.string().uuid(), alt: z.string().max(300) }).parse(i))
   .handler(async ({ data }): Promise<{ ok: true }> => {

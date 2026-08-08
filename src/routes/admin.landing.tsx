@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from "react";
 import { useQuery, useQueryClient } from "@tanstack/react-query";
 import { useServerFn } from "@tanstack/react-start";
 import { adminListLanding, adminGetLanding, adminSaveLanding, adminDeleteLanding } from "@/lib/landing.functions";
+import { adminListMedia } from "@/lib/admin-content.functions";
 import type { LandingPage } from "@/lib/config-types";
 import { LayoutTemplate, Plus, Save, Eye, ArrowLeft, Trash2, ExternalLink } from "lucide-react";
 import { toast } from "sonner";
@@ -98,6 +99,7 @@ function Editor({ id, onExit }: { id: string | "new"; onExit: () => void }) {
   const qc = useQueryClient();
   const getFn = useServerFn(adminGetLanding);
   const saveFn = useServerFn(adminSaveLanding);
+  const mediaFn = useServerFn(adminListMedia);
 
   const [title, setTitle] = useState("Untitled");
   const [slug, setSlug] = useState("");
@@ -129,8 +131,17 @@ function Editor({ id, onExit }: { id: string | "new"; onExit: () => void }) {
       const preset = (await import("grapesjs-preset-webpage")).default;
       const blocksBasic = (await import("grapesjs-blocks-basic")).default;
       if (cancelled || !containerRef.current) return;
+      // Pull the media library in so the image picker offers real store assets
+      // instead of an empty panel.
+      let assets: { src: string; name: string }[] = [];
+      try { assets = (await mediaFn()).map((m) => ({ src: m.url, name: m.name })); } catch { /* non-fatal */ }
+
       editor = grapesjs.init({
         container: containerRef.current,
+        assetManager: {
+          assets,
+          upload: false, // uploads go through our validated path, not GrapesJS
+        },
         height: "100%",
         width: "auto",
         fromElement: false,

@@ -1,9 +1,10 @@
 import { createFileRoute } from "@tanstack/react-router";
 import { useServerFn } from "@tanstack/react-start";
-import { Trash2, Upload, Image as ImageIcon, Copy } from "lucide-react";
+import { Trash2, Upload, Image as ImageIcon, Copy, Wand2, RefreshCw } from "lucide-react";
 import { useCallback, useEffect, useRef, useState } from "react";
 import { toast } from "sonner";
-import { adminListMedia, adminDeleteMedia, adminSetMediaAlt } from "@/lib/admin-content.functions";
+import { adminListMedia, adminDeleteMedia, adminSetMediaAlt, adminSyncMediaLibrary } from "@/lib/admin-content.functions";
+import { ImageEditor } from "@/components/admin/ImageEditor";
 import { adminUploadMedia } from "@/lib/admin-upload.functions";
 import { AiButton } from "@/components/admin/AiButton";
 import { aiAltText } from "@/lib/ai.functions";
@@ -26,6 +27,9 @@ function MediaPage() {
   const uploadFn = useServerFn(adminUploadMedia);
   const setAltFn = useServerFn(adminSetMediaAlt);
   const altFn = useServerFn(aiAltText);
+  const syncFn = useServerFn(adminSyncMediaLibrary);
+  const [editing, setEditing] = useState<MediaItem | null>(null);
+  const [syncing, setSyncing] = useState(false);
 
   const [media, setMedia] = useState<MediaItem[]>([]);
   const [loading, setLoading] = useState<boolean>(true);
@@ -101,6 +105,30 @@ function MediaPage() {
     try { await setAltFn({ data: { id, alt } }); } catch (err) { toast.error(err instanceof Error ? err.message : "Failed"); }
   }
 
+  async function onSync() {
+    setSyncing(true);
+    try {
+      const r = await syncFn();
+      toast.success(r.added > 0 ? `Imported ${r.added} existing image(s)` : `Nothing new — ${r.scanned} file(s) already in the library`);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Import failed");
+    } finally { setSyncing(false); }
+  }
+
+  // The editor hands back a data URL; push it through the normal upload path so
+  // it is validated, de-duplicated and registered like any other upload.
+  async function onSaveEdited(dataUrl: string, name: string) {
+    try {
+      await uploadFn({ data: { filename: name, dataUrl } });
+      toast.success("Edited image saved");
+      setEditing(null);
+      await load();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not save");
+    }
+  }
+
   async function onCopy(url: string) {
     try {
       await navigator.clipboard.writeText(url);
@@ -117,6 +145,10 @@ function MediaPage() {
           <h1 className="text-2xl font-bold">Media Library</h1>
           <p className="text-sm text-muted-foreground">{media.length} files</p>
         </div>
+        <div className="flex items-center gap-2">
+        <button onClick={onSync} disabled={syncing} className="inline-flex items-center gap-2 border px-4 py-2 rounded-md text-sm font-semibold hover:bg-muted disabled:opacity-60" title="Register images that already exist on the server (seeded artwork, previous uploads)">
+          <RefreshCw className={`h-4 w-4 ${syncing ? "animate-spin" : ""}`} /> {syncing ? "Importing…" : "Import existing"}
+        </button>
         <button
           onClick={() => fileRef.current?.click()}
           disabled={uploading}
@@ -124,6 +156,7 @@ function MediaPage() {
         >
           <Upload className="h-4 w-4" /> {uploading ? "Uploading…" : "Upload"}
         </button>
+        </div>
         <input ref={fileRef} type="file" accept="image/*" multiple hidden onChange={onUpload} />
       </div>
       {loading ? (
@@ -133,7 +166,8 @@ function MediaPage() {
       ) : media.length === 0 ? (
         <div className="border-2 border-dashed rounded-xl p-16 text-center text-muted-foreground">
           <ImageIcon className="h-10 w-10 mx-auto mb-3 opacity-40" />
-          No media yet. Click Upload to add images.
+          <p>No media in the library yet.</p>
+          <p className="text-xs mt-1">Already have images on the server? Click <strong>Import existing</strong> to register them.</p>
         </div>
       ) : (
         <div className="grid grid-cols-2 md:grid-cols-4 lg:grid-cols-5 gap-4">
@@ -157,12 +191,16 @@ function MediaPage() {
                 </div>
               </div>
               <div className="absolute top-2 right-2 flex gap-1 opacity-0 group-hover:opacity-100 transition">
+                <button onClick={() => setEditing(m)} className="p-1.5 bg-white/90 rounded shadow text-primary" title="Edit image (crop, resize, adjust)"><Wand2 className="h-3 w-3" /></button>
                 <button onClick={() => onCopy(m.url)} className="p-1.5 bg-white/90 rounded shadow" title="Copy URL"><Copy className="h-3 w-3" /></button>
                 <button onClick={() => onDelete(m)} className="p-1.5 bg-white/90 rounded shadow text-destructive" title="Delete"><Trash2 className="h-3 w-3" /></button>
               </div>
             </div>
           ))}
         </div>
+      )}
+      {editing && (
+        <ImageEditor src={editing.url} filename={editing.name} onSave={onSaveEdited} onClose={() => setEditing(null)} />
       )}
     </div>
   );
