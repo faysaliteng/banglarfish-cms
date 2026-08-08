@@ -170,8 +170,14 @@ export const getSettings = createServerFn({ method: "GET" }).handler(async (): P
   const { settings } = await import("@/server/db/schema");
   const { eq } = await import("drizzle-orm");
   const { defaultSettings } = await import("@/server/content-defaults");
-  const [row] = await db.select().from(settings).where(eq(settings.key, "store")).limit(1);
-  return { ...defaultSettings, ...((row?.value as Partial<Settings>) ?? {}) };
+  try {
+    const [row] = await db.select().from(settings).where(eq(settings.key, "store")).limit(1);
+    return { ...defaultSettings, ...((row?.value as Partial<Settings>) ?? {}) };
+  } catch (e) {
+    // The root loader calls this on every page; a transient DB error must not 500 the site.
+    console.error("[settings] falling back to defaults:", e instanceof Error ? e.message : e);
+    return defaultSettings;
+  }
 });
 
 export const adminListSubscribers = createServerFn({ method: "GET" }).handler(async (): Promise<{ email: string; couponCode: string; createdAt: string }[]> => {

@@ -168,11 +168,15 @@ function ComposeModal({ draft, setDraft, recipients, onClose, onSent }: { draft:
     if (!files || !files.length) return;
     setUploading(true);
     try {
+      // Accumulate locally: setDraft closes over a stale `draft` inside the loop,
+      // so calling it per file would keep only the last attachment.
+      const added: { filename: string; url: string }[] = [];
       for (const file of Array.from(files)) {
         const dataUrl: string = await new Promise((res, rej) => { const r = new FileReader(); r.onload = () => res(String(r.result)); r.onerror = rej; r.readAsDataURL(file); });
         const up = await uploadFn({ data: { filename: file.name, dataUrl } });
-        setDraft({ ...draft, attachments: [...draft.attachments, { filename: up.name || file.name, url: up.url }] });
+        added.push({ filename: up.name || file.name, url: up.url });
       }
+      if (added.length) setDraft({ ...draft, attachments: [...draft.attachments, ...added] });
     } catch (e) { toast.error(e instanceof Error ? e.message : "Upload failed (images & PDF only)"); }
     finally { setUploading(false); }
   }
