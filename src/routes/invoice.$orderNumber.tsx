@@ -21,7 +21,7 @@ function InvoicePage() {
   const custAddr = [inv.address_line1, inv.address_line2, [inv.city, inv.district, inv.postal_code].filter(Boolean).join(", ")].filter(Boolean);
 
   return (
-    <div style={{ background: "#f3f4f6", minHeight: "100vh", padding: 24, fontFamily: "system-ui, Arial, sans-serif", color: "#111827" }}>
+    <div style={{ background: "#f3f4f6", minHeight: "100vh", padding: "clamp(12px, 4vw, 24px)", fontFamily: "system-ui, Arial, sans-serif", color: "#111827" }}>
       <style>{`@media print { .noprint { display: none !important; } body, .page { background: #fff !important; } .page { box-shadow: none !important; margin: 0 !important; } @page { size: A4; margin: 14mm; } }`}</style>
 
       <div className="noprint" style={{ maxWidth: 760, margin: "0 auto 12px", display: "flex", justifyContent: "flex-end", gap: 8 }}>
@@ -29,9 +29,9 @@ function InvoicePage() {
         <button onClick={() => window.print()} style={{ background: "#fff", color: "#0ea5b7", border: "1px solid #0ea5b7", borderRadius: 8, padding: "10px 18px", fontWeight: 600, cursor: "pointer" }}>🖨 Print</button>
       </div>
 
-      <div className="page" style={{ maxWidth: 760, margin: "0 auto", background: "#fff", borderRadius: 10, boxShadow: "0 1px 8px rgba(0,0,0,.08)", padding: 40 }}>
+      <div className="page" style={{ maxWidth: 760, margin: "0 auto", background: "#fff", borderRadius: 10, boxShadow: "0 1px 8px rgba(0,0,0,.08)", padding: "clamp(16px, 5vw, 40px)" }}>
         {/* Header: store (left) + invoice meta (right) */}
-        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 24 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 24, flexWrap: "wrap" }}>
           <div style={{ maxWidth: 340 }}>
             {s.logo
               ? <img src={s.logo} alt={s.name} style={{ height: 46, maxWidth: 220, objectFit: "contain", marginBottom: 8 }} />
@@ -54,7 +54,7 @@ function InvoicePage() {
         <div style={{ height: 3, background: "#0ea5b7", borderRadius: 2, margin: "18px 0 22px" }} />
 
         {/* Bill to + payment */}
-        <div style={{ display: "flex", justifyContent: "space-between", gap: 24, fontSize: 13, marginBottom: 22 }}>
+        <div style={{ display: "flex", justifyContent: "space-between", gap: 24, fontSize: 13, marginBottom: 22, flexWrap: "wrap" }}>
           <div>
             <div style={{ fontSize: 11, textTransform: "uppercase", letterSpacing: 1, color: "#6b7280", fontWeight: 700, marginBottom: 4 }}>Bill to</div>
             <div style={{ fontWeight: 700 }}>{inv.full_name}</div>
@@ -70,7 +70,8 @@ function InvoicePage() {
         </div>
 
         {/* Items */}
-        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13 }}>
+        <div style={{ overflowX: "auto", WebkitOverflowScrolling: "touch" }}>
+        <table style={{ width: "100%", borderCollapse: "collapse", fontSize: 13, minWidth: 420 }}>
           <thead>
             <tr style={{ background: "#f9fafb", color: "#374151", textAlign: "left" }}>
               <th style={{ padding: "10px 8px", borderBottom: "2px solid #e5e7eb" }}>Description</th>
@@ -90,6 +91,7 @@ function InvoicePage() {
             ))}
           </tbody>
         </table>
+        </div>
 
         {/* Totals */}
         <div style={{ display: "flex", justifyContent: "flex-end", marginTop: 18 }}>

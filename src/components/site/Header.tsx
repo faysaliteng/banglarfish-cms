@@ -64,7 +64,7 @@ export function Header() {
         </div>
       </div>
       <div className="container-x flex items-center gap-3 md:gap-6 py-4">
-        <button className="md:hidden" onClick={() => setOpen(!open)} aria-label="Menu">
+        <button className="md:hidden -m-2 p-2 grid place-items-center min-h-[44px] min-w-[44px]" onClick={() => setOpen(!open)} aria-label="Menu">
           <Menu className="h-6 w-6" />
         </button>
         <Link to="/" className="shrink-0" aria-label="Banglarfish home">
@@ -91,7 +91,7 @@ export function Header() {
             </div>
           )}
           {!loading && !user && (
-            <Link to="/auth" search={{ next: "/account" }} className="hidden sm:flex items-center gap-1.5 text-sm hover:text-primary">
+            <Link to="/auth" search={{ next: "/account" }} className="hidden sm:flex items-center gap-1.5 text-sm hover:text-primary min-h-[44px] px-1">
               <User className="h-5 w-5" /> <span className="hidden lg:inline">{t("nav.signIn")}</span>
             </Link>
           )}
@@ -123,7 +123,7 @@ export function Header() {
               )}
             </div>
           )}
-          <Link to="/cart" className="relative flex items-center gap-1.5 text-sm hover:text-primary" aria-label="Cart">
+          <Link to="/cart" className="relative flex items-center justify-center gap-1.5 text-sm hover:text-primary min-h-[44px] min-w-[44px] px-1" aria-label="Cart">
             <ShoppingBag className="h-5 w-5" />
             {count > 0 && (
               <span className="absolute -top-2 -right-2 bg-[var(--color-brand)] text-[var(--color-brand-foreground)] text-[10px] font-bold rounded-full h-5 min-w-5 px-1 flex items-center justify-center">

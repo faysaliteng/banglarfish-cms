@@ -44,7 +44,7 @@ export function ProductCard({ product }: { product: Product }) {
           disabled={saving}
           aria-label={wished ? "Remove from wishlist" : "Save to wishlist"}
           title={wished ? "Remove from wishlist" : "Save to wishlist"}
-          className="absolute top-2 right-2 z-10 grid place-items-center h-8 w-8 rounded-full bg-white/90 shadow hover:bg-white transition disabled:opacity-60"
+          className="absolute top-2 right-2 z-10 grid place-items-center h-10 w-10 rounded-full bg-white/90 shadow hover:bg-white transition disabled:opacity-60"
         >
           <Heart className={`h-4 w-4 ${wished ? "fill-[var(--color-brand)] text-[var(--color-brand)]" : "text-foreground/70"}`} />
         </button>

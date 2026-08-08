@@ -43,12 +43,12 @@ function CartPage() {
                   <p className="text-sm font-bold text-[var(--color-brand)] mt-1">{formatBDT(l.price)}</p>
                 </div>
                 <div className="flex items-center border rounded-md shrink-0">
-                  <button onClick={() => cart.setQty(l.productId, l.weight, l.qty - 1)} className="p-2 hover:bg-muted"><Minus className="h-3 w-3" /></button>
+                  <button onClick={() => cart.setQty(l.productId, l.weight, l.qty - 1)} className="h-11 w-11 grid place-items-center hover:bg-muted"><Minus className="h-3 w-3" /></button>
                   <span className="w-10 text-center text-sm font-semibold">{l.qty}</span>
-                  <button onClick={() => cart.setQty(l.productId, l.weight, l.qty + 1)} className="p-2 hover:bg-muted"><Plus className="h-3 w-3" /></button>
+                  <button onClick={() => cart.setQty(l.productId, l.weight, l.qty + 1)} className="h-11 w-11 grid place-items-center hover:bg-muted"><Plus className="h-3 w-3" /></button>
                 </div>
                 <div className="w-24 text-right font-semibold shrink-0">{formatBDT(l.price * l.qty)}</div>
-                <button onClick={() => cart.remove(l.productId, l.weight)} className="p-1.5 text-muted-foreground hover:text-destructive shrink-0"><X className="h-4 w-4" /></button>
+                <button onClick={() => cart.remove(l.productId, l.weight)} className="h-11 w-11 grid place-items-center ml-2 text-muted-foreground hover:text-destructive shrink-0"><X className="h-4 w-4" /></button>
               </div>
             ))}
           </div>
